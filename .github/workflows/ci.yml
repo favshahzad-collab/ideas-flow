@@ -1,0 +1,399 @@
+# The gates, run automatically. Everything here can be run by hand from the
+# repo root — see frontend/README.md — and this file exists so that nobody has
+# to remember to.
+#
+# Four jobs, because they need very different things. `checks` reads files and
+# needs nothing but Node. `integration` needs Postgres. `browser` needs
+# Postgres, a migrated database, the API running and a Chromium, because the
+# accessibility audit drives the real app: no static check can see a button
+# with no accessible name. `fresh-install` needs the same, minus the browser,
+# against a database with nothing in it.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  checks:
+    name: build · test · lint · audits
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            backend/package-lock.json
+
+      - name: Install frontend
+        working-directory: frontend
+        run: npm ci
+
+      # `npm run build` is `tsc -b && vite build`. Never `tsc --noEmit` here:
+      # it type-checks a different set of files than the build does.
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Test frontend
+        working-directory: frontend
+        run: npm test
+
+      - name: Lint frontend
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Colour and type tokens
+        working-directory: frontend
+        run: npm run audit:contrast
+
+      - name: Dead code
+        working-directory: frontend
+        run: npm run audit:dead
+
+      # The accessibility job below drives the real app, but it reads a
+      # RESTING DOM - an animation is not in the DOM. A logo pulsing forever on
+      # every screen passed that job green, so movement gets its own check.
+      - name: Motion that never stops
+        working-directory: frontend
+        run: npm run audit:motion
+
+      - name: Install backend
+        working-directory: backend
+        run: npm ci
+
+      - name: Generate Prisma client
+        working-directory: backend
+        run: npm run prisma:generate
+
+      # Covers `prisma/` too, which the build deliberately excludes - the
+      # seeds were unchecked entirely until this existed.
+      - name: Typecheck backend
+        working-directory: backend
+        run: npm run typecheck
+
+      - name: Build backend
+        working-directory: backend
+        run: npm run build
+
+      - name: Lint backend
+        working-directory: backend
+        run: npm run lint
+
+      - name: Test backend
+        working-directory: backend
+        run: npm test
+
+      # Dependency advisories, on the shipped tree only (`--omit=dev`): a
+      # vulnerability in a test runner is not a vulnerability in the product.
+      #
+      # This used to be `--audit-level=critical`, on the argument that the
+      # high advisories open at the time were all unreachable Prisma CLI
+      # transitives and a gate that is red on day one stops being read. The
+      # argument holds; the threshold did not. A `multer` advisory sat in that
+      # same bucket - four issues on the authenticated upload path, one of
+      # them a file size limit bypass in the library enforcing this
+      # application's 20 MB cap - and `critical` never mentioned it.
+      #
+      # So the gate blocks on every high and critical except the ones written
+      # down, with a reason, in the script itself. Judged is green; new is red.
+      - name: Dependency advisories (backend)
+        working-directory: backend
+        run: node ../.github/scripts/audit-gate.mjs
+
+      - name: Dependency advisories (frontend)
+        working-directory: frontend
+        run: node ../.github/scripts/audit-gate.mjs
+
+  # The services, against a real database. Separate from `checks` because it
+  # needs Postgres, and separate from `browser` because it needs its own
+  # database: the suite truncates every table between tests, and `browser`
+  # is using its own for the seeded fixtures the audit walks.
+  integration:
+    name: services (real database)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: daws
+          POSTGRES_PASSWORD: daws
+          POSTGRES_DB: daws_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U daws"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      # The only variable the suite reads. It refuses to start without it,
+      # and refuses any database whose name does not end in `_test`.
+      TEST_DATABASE_URL: postgresql://daws:daws@localhost:5432/daws_test
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend
+        working-directory: backend
+        run: npm ci
+
+      - name: Generate Prisma client
+        working-directory: backend
+        run: npm run prisma:generate
+
+      # Migrations are applied by the suite's own global setup, so there is
+      # no migrate step here - one less place for the two to disagree.
+      - name: Services against Postgres
+        working-directory: backend
+        run: npm run test:db
+
+  browser:
+    name: accessibility (real app)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: daws
+          POSTGRES_PASSWORD: daws
+          POSTGRES_DB: daws
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U daws"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgresql://daws:daws@localhost:5432/daws
+      DIRECT_URL: postgresql://daws:daws@localhost:5432/daws
+      JWT_SECRET: ci-only-secret-not-used-anywhere-else-32chars
+      STORAGE_DIR: ./storage
+      PORT: 3000
+      NODE_ENV: development
+      # The seeded administrator has no two-step sign-in, and this job drives
+      # the app as them. With the requirement on, every screen past sign-in
+      # would be the setup gate. The gate is proven in the integration suite
+      # (admin-two-step.itest.ts); here it would only hide what is audited.
+      REQUIRE_ADMIN_TWO_FACTOR: "false"
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            backend/package-lock.json
+
+      - name: Install backend
+        working-directory: backend
+        run: npm ci
+
+      # The other two jobs generate the client and this one did not, which is
+      # invisible on a developer's machine - the client is already on disk
+      # there - and fatal on a clean runner. `migrate deploy` does not need it;
+      # `seed.ts` imports it, so the seed died with "Cannot find module
+      # '../src/generated/prisma/client'" and took the whole audit with it.
+      # It is generated output and stays gitignored; it just has to be built
+      # everywhere it is used.
+      - name: Generate Prisma client
+        working-directory: backend
+        run: npm run prisma:generate
+
+      # Both seeds. `seed` alone leaves every screen empty, and an
+      # accessibility audit of eight empty screens certifies almost nothing:
+      # no table rows, no dialogs to open, no chain to render.
+      - name: Migrate and seed
+        working-directory: backend
+        run: |
+          npx prisma migrate deploy
+          npm run seed
+          npm run seed:demo
+
+      - name: Start the API
+        working-directory: backend
+        run: |
+          npm run build
+          npm start &
+          npx wait-on http://localhost:3000/api/health --timeout 60000
+
+      - name: Install frontend
+        working-directory: frontend
+        run: npm ci
+
+      # The audit needs a browser it can drive. `playwright-core` is not a
+      # dependency of the app — it would pull a driver into every install for
+      # one script — so it is installed here, for this job only.
+      - name: Install Chromium
+        working-directory: frontend
+        run: |
+          # `--with-deps` runs `apt-get update`, and the runner image ships
+          # with Google's Chrome repository configured. When that repository
+          # serves an index whose hash does not match its own Release file -
+          # which it did for every attempt on 2026-09-09 - apt fails the whole
+          # update and this gate cannot run at all, on a change that has
+          # nothing to do with it.
+          #
+          # Playwright downloads its own Chromium build. Google's repository
+          # is not a source of anything this job needs, so it is removed
+          # rather than depended on. Both filenames: the image has moved
+          # between .list and .sources across versions.
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.list /etc/apt/sources.list.d/google-chrome.sources
+          npm i --no-save playwright-core playwright
+          npx playwright install --with-deps chromium
+
+      # The audit drives the dev server, which is what it is written against.
+      - name: Start the UI
+        working-directory: frontend
+        run: |
+          npm run dev &
+          npx wait-on http://localhost:5173 --timeout 60000
+
+      - name: Accessibility
+        working-directory: frontend
+        run: npm run audit:a11y
+        env:
+          AUDIT_BASE: http://localhost:5173
+          # Matches backend/prisma/seed.ts. Change both together.
+          AUDIT_EMAIL: admin@example.com
+          AUDIT_PASSWORD: password
+
+  # The one gate that starts where a customer starts.
+  #
+  # `browser` seeds the demo fixtures, because an accessibility audit of eight
+  # empty screens certifies almost nothing. The cost is that it is blind to the
+  # opposite failure: everything a first morning depends on - the import
+  # template matching the importer, a route that can be built when none exists,
+  # a memo submitted when there is nothing to copy - was only ever exercised
+  # against a database that already had all of it.
+  #
+  # So this job seeds the departments and one administrator, and nothing else,
+  # then drives the whole process over HTTP. The routes are the point: the
+  # integration suite calls the services directly, and half of what a first
+  # morning trips over lives in validation, permissions and multipart parsing.
+  fresh-install:
+    name: fresh install (day one)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: daws
+          POSTGRES_PASSWORD: daws
+          POSTGRES_DB: daws
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U daws"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgresql://daws:daws@localhost:5432/daws
+      DIRECT_URL: postgresql://daws:daws@localhost:5432/daws
+      JWT_SECRET: ci-only-secret-not-used-anywhere-else-32chars
+      STORAGE_DIR: ./storage
+      PORT: 3000
+      NODE_ENV: development
+      # The seeded administrator has no two-step sign-in, and this job drives
+      # the app as them. With the requirement on, every screen past sign-in
+      # would be the setup gate. The gate is proven in the integration suite
+      # (admin-two-step.itest.ts); here it would only hide what is audited.
+      REQUIRE_ADMIN_TWO_FACTOR: "false"
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend
+        working-directory: backend
+        run: npm ci
+
+      # `migrate deploy` does not need the client; `seed.ts` imports it.
+      - name: Generate Prisma client
+        working-directory: backend
+        run: npm run prisma:generate
+
+      # `seed` alone, deliberately. `seed:demo` here would defeat the whole
+      # job, and the check refuses to run against a database that has anything
+      # in it rather than quietly testing something else.
+      - name: Migrate and seed
+        working-directory: backend
+        run: |
+          npx prisma migrate deploy
+          npm run seed
+
+      # `node` rather than `npm start`, and its pid kept, so the stop step
+      # below signals the API itself rather than npm in front of it.
+      - name: Start the API
+        working-directory: backend
+        run: |
+          npm run build
+          node dist/src/index.js > api.log 2>&1 &
+          echo $! > api.pid
+          npx wait-on http://localhost:3000/api/health --timeout 60000
+
+      # No SMTP host is set, here or anywhere in CI, and the check knows it: it
+      # asserts that mail was raised for the approvers and leaves delivery to
+      # `email.delivery.itest.ts`, which stands up a real SMTP server of its own
+      # in the integration job.
+      - name: Day one, end to end
+        working-directory: backend
+        run: npm run check:fresh-install
+        env:
+          FRESH_CHECK_API: http://localhost:3000
+          FRESH_CHECK_STORAGE: ./storage
+          # Matches backend/prisma/seed.ts with no SEED_ADMIN_* set.
+          FRESH_CHECK_EMAIL: admin@example.com
+          FRESH_CHECK_PASSWORD: password
+
+      # The one place a real signal can be sent: Node on Windows cannot receive
+      # SIGTERM from outside, so `lib/shutdown.test.ts` proves the order and
+      # this proves the wiring. After a whole day-one run, so there is real
+      # work to have finished.
+      - name: Stops cleanly on SIGTERM
+        working-directory: backend
+        run: |
+          kill -TERM "$(cat api.pid)"
+          for _ in $(seq 1 30); do kill -0 "$(cat api.pid)" 2>/dev/null || break; sleep 0.5; done
+          if kill -0 "$(cat api.pid)" 2>/dev/null; then echo "still running after 15 s"; exit 1; fi
+          grep '"event":"server.stopped"' api.log
+          grep -q '"event":"server.stopped".*"clean":true' api.log
+
+      - name: Refuses to start on an environment it cannot use
+        working-directory: backend
+        run: |
+          set +e
+          SLA_DEFAULT_DAYS=5d ALLOW_STEP_SKIP=yes node dist/src/index.js > bad.log 2>&1
+          code=$?
+          set -e
+          cat bad.log
+          test "$code" -eq 1
+          grep -q "SLA_DEFAULT_DAYS must be a whole number from 1 up" bad.log
+          grep -q "ALLOW_STEP_SKIP must be true or false" bad.log
+
+      - name: check:env agrees
+        working-directory: backend
+        run: |
+          npm run check:env
+          if NODE_ENV=production npm run check:env; then echo "production without TRUST_PROXY passed"; exit 1; fi

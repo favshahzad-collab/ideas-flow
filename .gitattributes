@@ -1,0 +1,11 @@
+# Every source file in this repo is written with LF. Without this, Git on
+# Windows converts them to CRLF on checkout and the next `git status` reports
+# all 238 of them as modified.
+* text=auto eol=lf
+
+# Never let line-ending conversion touch a binary.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.pdf binary
+*.ico binary

@@ -1,0 +1,13 @@
+-- A comment on a memo tells the people party to it.
+--
+-- It did not. Somebody could write "the grade on page 2 does not match the
+-- scale" under a memo waiting on their signature and nobody was told: no
+-- notification, no notice, no audit row. The thread rendered as a
+-- conversation - avatars, names, timestamps - and was a message to nobody.
+--
+-- It went unnoticed because the rejection reason and the revision request are
+-- written into the SAME thread by `approval.service`, and those do notify
+-- through their own path. Only a free-standing comment was silent, which is
+-- exactly the one a reviewer leaves when they have a question and are not
+-- ready to send the memo back.
+ALTER TYPE "NotificationType" ADD VALUE IF NOT EXISTS 'COMMENT_ADDED';

@@ -1,0 +1,16 @@
+-- Being passed over is not a request for approval.
+--
+-- The skipped reviewer WAS told - that was never missing. They were told with
+-- APPROVAL_NEEDED, for want of a type meaning what had actually happened, and
+-- three things followed from the one wrong word:
+--
+--   the mail arrived headed "Approval needed", at somebody whose approval had
+--   just been bypassed;
+--   the inbox maps that type to `action`, so it landed in "Needs you", the
+--   group deliberately kept clear of anything that is not a task;
+--   and the row offered a button reading "Open to sign", on a memo they can
+--   no longer sign.
+--
+-- The same shape as the resubmission subject line: individually plausible,
+-- and describing the wrong event.
+ALTER TYPE "NotificationType" ADD VALUE IF NOT EXISTS 'STEP_SKIPPED';

@@ -1,0 +1,1280 @@
+generator client {
+  provider        = "prisma-client"
+  output          = "../src/generated/prisma"
+  moduleFormat    = "cjs"
+  previewFeatures = ["relationJoins"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// Departments.
+///
+/// `name` is unique, and there is a SECOND uniqueness rule the Prisma schema
+/// cannot express: a unique index on `lower(name)`, created in the migration
+/// `20260909120000_department_management`. Without it "Finance" and "finance"
+/// can both exist, and the bulk user import - which matches a spreadsheet cell
+/// to a department by lowercased name - would silently pick one of them.
+model Department {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String   @unique @db.VarChar(255)
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  users     User[]
+
+  @@index([isActive])
+  @@map("departments")
+}
+
+/// Application user profile. id MUST match Supabase auth.users.id (no local auth table).
+model User {
+  id                    String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  firstName             String               @map("first_name") @db.VarChar(100)
+  lastName              String               @map("last_name") @db.VarChar(100)
+  email                 String               @unique @db.VarChar(255)
+  /// scrypt hash of the user's password. Nullable so accounts can exist
+  /// before a password is set; login refuses any user without one.
+  passwordHash          String?              @map("password_hash")
+  departmentId          String               @map("department_id") @db.Uuid
+  /// Job title as it should be printed beneath this person's signature.
+  /// Nullable because the column arrived after the accounts did.
+  designation           String?              @db.VarChar(120)
+  loginRole             LoginRole            @default(USER) @map("login_role")
+  /// The top tier of administrator: every power, including managing other
+  /// administrators and the security settings. Meaningful only with
+  /// loginRole ADMINISTRATOR. There is always at least one active.
+  isSuperAdmin          Boolean              @default(false) @map("is_super_admin")
+  /// The powers a Super Administrator has given this administrator, as
+  /// capability ids (lib/capabilities). Ignored for a Super Administrator,
+  /// who holds them all, and for a USER.
+  adminPowers           String[]             @default([]) @map("admin_powers")
+  /// Who this person reports to. Told when a memo has sat with this person
+  /// two working days past its deadline. Null until an administrator records
+  /// one; never the person themselves.
+  lineManagerId         String?              @map("line_manager_id") @db.Uuid
+  lineManager           User?                @relation("UserLineManager", fields: [lineManagerId], references: [id], onDelete: SetNull)
+  reports               User[]               @relation("UserLineManager")
+  /// When this account was switched off, or null while it is in use.
+  ///
+  /// The answer to somebody leaving. Deleting them is refused the moment they
+  /// have prepared, approved or commented on anything - which is everybody
+  /// worth deleting - so before this existed a person who left kept a working
+  /// password for as long as the organisation used the system. A timestamp
+  /// rather than a flag because "since when" is the question asked next, and
+  /// because it is the shape every other state change on this row already
+  /// uses.
+  ///
+  /// It ends sign-in and takes them out of every picker. It changes nothing
+  /// that has happened: their signatures stand, their name stays on the memos
+  /// they approved, and the steps they were holding stay theirs until an
+  /// administrator moves them.
+  deactivatedAt         DateTime?            @map("deactivated_at") @db.Timestamptz(6)
+  signatureStoragePath  String?              @map("signature_storage_path")
+  /// SHA-256 of the saved signature image, so each signature made with it can
+  /// record exactly which image went on the page.
+  signatureChecksum     String?              @map("signature_checksum") @db.VarChar(64)
+  createdAt             DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime             @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  approvalActions       ApprovalAction[]
+  assignedChainSteps    ApprovalChainStep[]
+  createdChains         ApprovalChain[]      @relation("ApprovalChainCreatedBy")
+  createdTemplates      WorkflowTemplate[]   @relation("WorkflowTemplateCreatedBy")
+  auditLogs             AuditLog[]
+  uploadedVersions      DocumentVersion[]
+  preparedDocuments     Document[]           @relation("DocumentPreparer")
+  notifications         Notification[]
+  department            Department           @relation(fields: [departmentId], references: [id])
+  documentComments      DocumentComment[]
+  supportingDocuments   SupportingDocument[]
+  delegationsGiven      Delegation[]         @relation("DelegationDelegator")
+  delegationsHeld       Delegation[]         @relation("DelegationDelegate")
+  delegationsCreated    Delegation[]         @relation("DelegationCreatedBy")
+  delegationsRevoked    Delegation[]         @relation("DelegationRevokedBy")
+  holidaysAdded         PublicHoliday[]
+  calendarUpdates       CalendarSetting[]
+  emails                EmailMessage[]
+  approvalsOnBehalfOf   ApprovalAction[]     @relation("ApprovalActionOnBehalfOf")
+  refreshSessions       RefreshSession[]
+  mailSettingsSaved     MailSetting[]
+  workflowSettingsSaved WorkflowSetting[]
+  ssoSettingsSaved      SsoSetting[]
+  ssoLogins             SsoLogin[]
+  memoDrafts            MemoDraft[]          @relation("MemoDraftPreparer")
+  brandingSettingsSaved BrandingSetting[]
+  memoClausesCreated    MemoClause[]         @relation("MemoClauseCreatedBy")
+  memoClausesUpdated    MemoClause[]         @relation("MemoClauseUpdatedBy")
+  dictionaryWordsAdded  MemoDictionaryWord[] @relation("MemoDictionaryWordAddedBy")
+  /// Every token issued before this moment is refused, access tokens
+  /// included. Moved when a password changes, when somebody signs out of
+  /// everywhere, and when an administrator ends their sessions - which is the
+  /// only way to end an access token, because a session table cannot: the
+  /// client holds it and never presents it here until it is used.
+  sessionsValidFrom     DateTime             @default(now()) @map("sessions_valid_from") @db.Timestamptz(6)
+  /// The authenticator app's shared secret, encrypted with lib/secretBox.
+  /// Rotating JWT_SECRET makes it unreadable, which verification reports as a
+  /// refusal an administrator can fix rather than as a crash.
+  totpSecret            String?              @map("totp_secret")
+  /// Null until a code from that secret has been typed back in. A secret
+  /// written down at the start of enrolment proves a QR code was drawn, not
+  /// that anybody's phone can read it - and switching the factor on before
+  /// that confirmation is how somebody locks themselves out during setup.
+  totpActivatedAt       DateTime?            @map("totp_activated_at") @db.Timestamptz(6)
+  /// The last thirty-second step accepted, so a code cannot be used twice.
+  /// A correct code stays correct for up to ninety seconds; without this, one
+  /// read over a shoulder is replayable for the rest of its window.
+  totpLastStep          BigInt?              @map("totp_last_step")
+  totpRecoveryCodes     TotpRecoveryCode[]
+  totpChallenges        TotpChallenge[]
+
+  @@index([departmentId])
+  @@index([loginRole])
+  @@index([email])
+  /// Every people list filters on it, and the pickers do it on every keystroke.
+  @@index([deactivatedAt])
+  @@index([lineManagerId])
+  @@map("users")
+}
+
+model Document {
+  id                          String               @id @default(uuid()) @db.Uuid
+  /// Human-quotable reference, assigned at submission. Unique so it can be
+  /// cited on a paper file and typed back into search.
+  referenceNumber             String?              @unique @map("reference_number") @db.VarChar(64)
+  title                       String               @db.VarChar(500)
+  description                 String?
+  status                      DocumentStatus       @default(DRAFT)
+  preparerId                  String               @map("preparer_id") @db.Uuid
+  currentVersionNumber        Int                  @default(0) @map("current_version_number")
+  currentWorkflowRunId        String?              @unique @map("current_workflow_run_id") @db.Uuid
+  revisionRequestedByActionId String?              @unique @map("revision_requested_by_action_id") @db.Uuid
+  submittedAt                 DateTime?            @map("submitted_at") @db.Timestamptz(6)
+  approvedAt                  DateTime?            @map("approved_at") @db.Timestamptz(6)
+  /// The file carrying every signature, fixed at final approval. This is
+  /// the approved version - the one HR prints and the audit trail cites.
+  finalSignedStoragePath      String?              @map("final_signed_storage_path") @db.VarChar(1024)
+  /// SHA-256 of that file, taken as it was written. What makes the approved
+  /// memo checkable rather than merely stored: if the bytes served ever stop
+  /// matching this, the file is not the one the last approver signed.
+  finalSignedChecksum         String?              @map("final_signed_checksum") @db.VarChar(64)
+  /// Whose digital seal the approved file carries, or null when it was not
+  /// sealed (no certificate, the switch off, or approved before sealing).
+  sealedBy                    String?              @map("sealed_by") @db.VarChar(255)
+  /// Which template drew this memo, for one typed in the portal.
+  ///
+  /// Null is the uploaded-PDF memo, which is every memo that existed before
+  /// in-app authoring and every memo submitted that way since. The column is
+  /// a name rather than an enum so that adding a second memo type is a
+  /// template registration, not a migration.
+  memoType                    String?              @map("memo_type") @db.VarChar(64)
+  /// The header block. `title` is the subject; these three did not exist.
+  memoTo                      String?              @map("memo_to") @db.VarChar(200)
+  memoFrom                    String?              @map("memo_from") @db.VarChar(200)
+  /// The date the memo bears, as the preparer typed it - which is not the
+  /// date it was submitted. A memo drafted over a fortnight, approved
+  /// verbally and then put through the system is dated the day it was
+  /// written, and the header prints this rather than `submittedAt`.
+  ///
+  /// A DATE, not a timestamp: nobody dates a memo to the minute, and a
+  /// date-only value also makes two renders of the same memo on the same day
+  /// byte-identical, since the PDF's own dates are pinned to it.
+  ///
+  /// Null for an uploaded memo, and for a typed one submitted before this
+  /// existed - those fall back to the submission date, which is what they
+  /// were drawn with.
+  memoDate                    DateTime?            @map("memo_date") @db.Date
+  rejectedAt                  DateTime?            @map("rejected_at") @db.Timestamptz(6)
+  /// When its preparer chose to leave it rejected rather than resubmit it.
+  /// Null while that decision is still theirs to make; set, the memo is
+  /// closed for good and stays on record as rejected.
+  rejectionClosedAt           DateTime?            @map("rejection_closed_at") @db.Timestamptz(6)
+  deletedAt                   DateTime?            @map("deleted_at") @db.Timestamptz(6)
+  /// Why it was withdrawn (by its preparer) or cancelled (by an
+  /// administrator). Required for both; the status stays DELETED, which the
+  /// screens call "Withdrawn", and the memo stays on record.
+  withdrawalReason            String?              @map("withdrawal_reason") @db.VarChar(1000)
+  /// Who withdrew or cancelled it - the preparer, or an administrator.
+  withdrawnById               String?              @map("withdrawn_by_id") @db.Uuid
+  createdAt                   DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                   DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  approvalChain               ApprovalChain?
+  versions                    DocumentVersion[]
+  currentWorkflowRun          WorkflowRun?         @relation("DocumentCurrentWorkflowRun", fields: [currentWorkflowRunId], references: [id])
+  preparer                    User                 @relation("DocumentPreparer", fields: [preparerId], references: [id])
+  templateId                  String?              @map("template_id") @db.Uuid
+  template                    WorkflowTemplate?    @relation(fields: [templateId], references: [id])
+  revisionRequestedByAction   ApprovalAction?      @relation("DocumentRevisionRequestedBy", fields: [revisionRequestedByActionId], references: [id])
+  notifications               Notification[]
+  workflowRuns                WorkflowRun[]        @relation("DocumentWorkflowRuns")
+  comments                    DocumentComment[]
+  supportingDocuments         SupportingDocument[]
+  emails                      EmailMessage[]
+
+  @@index([preparerId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([templateId])
+  @@map("documents")
+}
+
+/// Reusable approval workflow template designed by admins via the drag-and-drop designer.
+/// `graph` stores the React Flow compatible node graph (nodes + edges) as JSON.
+/// A block of standard wording an administrator keeps for preparers to
+/// insert - the usual recommendation paragraph, an approval condition, the
+/// sentence a memo of a given kind always opens with.
+///
+/// The body is the same node set a memo body is, so the editor inserts it as
+/// it is and the renderer draws it as it draws anything else. What is inserted
+/// is a COPY: a memo that carried this wording keeps the words it was signed
+/// with however the clause is edited afterwards.
+model MemoClause {
+  id          String    @id @default(uuid()) @db.Uuid
+  title       String    @db.VarChar(120)
+  bodyJson    Json      @map("body_json")
+  /// Taken out of the preparer's list without being deleted. The wording
+  /// may be on a hundred filed memos, and the trail names it by id.
+  archivedAt  DateTime? @map("archived_at") @db.Timestamptz(6)
+  createdById String?   @map("created_by_id") @db.Uuid
+  updatedById String?   @map("updated_by_id") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  createdBy   User?     @relation("MemoClauseCreatedBy", fields: [createdById], references: [id])
+  updatedBy   User?     @relation("MemoClauseUpdatedBy", fields: [updatedById], references: [id])
+
+  @@index([archivedAt])
+  @@map("memo_clauses")
+}
+
+/// A word the organisation spells its own way - a name, a product, a term of
+/// its trade the English dictionary does not know - so the memo editor stops
+/// flagging it. `key` is the lowercase form the uniqueness is on; `word` is
+/// how it was written. People's names and department names are not kept
+/// here: the directory already holds them and they are read from it.
+model MemoDictionaryWord {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  word      String   @db.VarChar(80)
+  key       String   @unique @db.VarChar(80)
+  addedById String?  @map("added_by_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  addedBy User? @relation("MemoDictionaryWordAddedBy", fields: [addedById], references: [id])
+
+  @@map("memo_dictionary_words")
+}
+
+model WorkflowTemplate {
+  id          String     @id @default(uuid()) @db.Uuid
+  name        String     @db.VarChar(255)
+  description String?
+  isActive    Boolean    @default(true) @map("is_active")
+  /// Retired: hidden from choosing and from Workflow studio's main list, not
+  /// editable, and kept. Archiving also sets isActive to false, so every check
+  /// that offers only active templates refuses an archived one too. Replaces
+  /// deleting, which lost the design for good.
+  archivedAt  DateTime?  @map("archived_at") @db.Timestamptz(6)
+  graph       Json       @map("graph")
+  createdById String?    @map("created_by_id") @db.Uuid
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  createdBy   User?      @relation("WorkflowTemplateCreatedBy", fields: [createdById], references: [id])
+  documents   Document[]
+  memoTypeRoutes MemoTypeRoute[]
+
+  @@index([isActive])
+  @@index([archivedAt])
+  @@index([createdById])
+  @@map("workflow_templates")
+}
+
+/// Optional attachments uploaded by the preparer (not signed as part of the approval chain).
+model SupportingDocument {
+  id           String   @id @default(uuid()) @db.Uuid
+  documentId   String   @map("document_id") @db.Uuid
+  fileName     String   @map("file_name") @db.VarChar(500)
+  contentType  String   @map("content_type") @db.VarChar(255)
+  storagePath  String   @map("storage_path")
+  sizeBytes    Int      @map("size_bytes")
+  uploadedById String   @map("uploaded_by_id") @db.Uuid
+  /// Not on the current version: removed from it when the memo was revised.
+  /// Kept, and still readable - it is what an earlier version carried.
+  isDeleted    Boolean  @default(false) @map("is_deleted")
+  /// The version it was first attached to.
+  addedInVersion   Int  @default(1) @map("added_in_version")
+  /// The version it was taken off, or null while it is still attached. A
+  /// version's set is every file added at or before it and not removed by it.
+  removedInVersion Int? @map("removed_in_version")
+  uploadedAt   DateTime @default(now()) @map("uploaded_at") @db.Timestamptz(6)
+  document     Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  uploadedBy   User     @relation(fields: [uploadedById], references: [id])
+
+  @@index([documentId, isDeleted])
+  @@index([uploadedById])
+  @@map("supporting_documents")
+}
+
+/// Immutable version record. Never update file content — new upload = new row.
+model DocumentVersion {
+  id                  String           @id @default(uuid()) @db.Uuid
+  documentId          String           @map("document_id") @db.Uuid
+  versionNumber       Int              @map("version_number")
+  storagePath         String           @map("storage_path")
+  /// Exactly what was uploaded, before the preparer's signature was burned
+  /// in. Never written to again.
+  originalStoragePath String?          @map("original_storage_path") @db.VarChar(1024)
+  /// SHA-256 of the memo as submitted (`storagePath`).
+  storageChecksum     String?          @map("storage_checksum") @db.VarChar(64)
+  /// SHA-256 of the file as uploaded (`originalStoragePath`).
+  originalChecksum    String?          @map("original_checksum") @db.VarChar(64)
+  /// The authored body this version's PDF was rendered from, for a memo
+  /// typed in the portal. Null for an uploaded one, which has no body to
+  /// hold - the PDF is the document.
+  ///
+  /// Per version rather than per document, because that is what makes the
+  /// artefact explainable: v1 says what v1 was drawn from, and a revision
+  /// that produced v2 cannot rewrite it.
+  bodyJson            Json?            @map("body_json")
+  /// Where each signatory's signature belongs on this version's PDF, as the
+  /// renderer placed the printed strip: `[{ key, name, page, x, y, width,
+  /// height }]` in PDF points with a top-left origin. Null for an uploaded
+  /// memo, which has no strip and no slots.
+  ///
+  /// Recorded rather than recomputed. An approver opens this document weeks
+  /// later, by which time the chain may have been reassigned and the branding
+  /// changed; drawing the memo again to find out where the lines went would
+  /// answer for the memo as it would be drawn today, not for the one they are
+  /// being asked to sign.
+  signatureSlots      Json?            @map("signature_slots")
+  /// Notes the preparer placed on the page, as drawn.
+  ///
+  /// Not `notes` below, which is a line of prose about the version. These are
+  /// boxes with coordinates, recorded for the same reason `signatureSlots`
+  /// is: the artefact is immutable, and what was drawn on it has to be
+  /// answerable later without redrawing the memo as it would look today.
+  pageNotesJson       Json?            @map("page_notes_json")
+  /// The paper and margins this version was actually drawn on.
+  ///
+  /// The third member of the same family, and for the same reason: re-drawing
+  /// a memo filed last year against whatever the settings screen says today
+  /// would produce a document that no longer matches the checksum the audit
+  /// trail cites. Null means the default page, which is what every version
+  /// filed before page setup existed used.
+  pageSetupJson       Json?            @map("page_setup_json")
+  uploadedById        String           @map("uploaded_by_id") @db.Uuid
+  isDeleted           Boolean          @default(false) @map("is_deleted")
+  uploadedAt          DateTime         @default(now()) @map("uploaded_at") @db.Timestamptz(6)
+  notes               String?
+  approvalActions     ApprovalAction[]
+  document            Document         @relation(fields: [documentId], references: [id])
+  uploadedBy          User             @relation(fields: [uploadedById], references: [id])
+  workflowRuns        WorkflowRun[]
+
+  @@unique([documentId, versionNumber])
+  @@index([uploadedById])
+  @@index([documentId, isDeleted])
+  @@map("document_versions")
+}
+
+/// Ordered approval chain definition for a document. Reused across revision cycles.
+model ApprovalChain {
+  id           String              @id @default(uuid()) @db.Uuid
+  documentId   String              @unique @map("document_id") @db.Uuid
+  createdById  String?             @map("created_by_id") @db.Uuid
+  createdAt    DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  steps        ApprovalChainStep[]
+  createdBy    User?               @relation("ApprovalChainCreatedBy", fields: [createdById], references: [id])
+  document     Document            @relation(fields: [documentId], references: [id])
+  workflowRuns WorkflowRun[]
+
+  @@map("approval_chains")
+}
+
+model ApprovalChainStep {
+  id              String           @id @default(uuid()) @db.Uuid
+  chainId         String           @map("chain_id") @db.Uuid
+  stepOrder       Int              @map("step_order")
+  approvalType    ApprovalType     @map("approval_type")
+  assignedUserId  String           @map("assigned_user_id") @db.Uuid
+  /// Working days this approver is given, once the memo reaches them. Null
+  /// falls back to SLA_DEFAULT_DAYS, and null with that unset means the step
+  /// has no deadline at all - which is the delivered behaviour, because a
+  /// deadline is a policy an organisation owns rather than a number this code
+  /// can pick.
+  slaDays         Int?             @map("sla_days")
+  approvalActions ApprovalAction[]
+  assignedUser    User             @relation(fields: [assignedUserId], references: [id])
+  chain           ApprovalChain    @relation(fields: [chainId], references: [id])
+
+  @@unique([chainId, stepOrder])
+  @@index([chainId])
+  @@index([assignedUserId])
+  @@map("approval_chain_steps")
+}
+
+/// One execution cycle per document version submission. Revision creates a new run; prior run becomes SUPERSEDED.
+model WorkflowRun {
+  id                   String            @id @default(uuid()) @db.Uuid
+  documentId           String            @map("document_id") @db.Uuid
+  documentVersionId    String            @map("document_version_id") @db.Uuid
+  chainId              String            @map("chain_id") @db.Uuid
+  status               WorkflowRunStatus @default(IN_PROGRESS)
+  currentStepOrder     Int               @default(1) @map("current_step_order")
+  startedAt            DateTime          @default(now()) @map("started_at") @db.Timestamptz(6)
+  /// When the memo reached whoever is holding it now. Moved on every advance,
+  /// so a due date is one column plus an addition rather than a scan back
+  /// through the approval actions on every row of every queue.
+  currentStepStartedAt DateTime          @default(now()) @map("current_step_started_at") @db.Timestamptz(6)
+  /// When the holder was last chased about this step running over. Cleared
+  /// when the step advances, so each approver is chased once for their own
+  /// step and never for somebody else's.
+  breachNotifiedAt     DateTime?         @map("breach_notified_at") @db.Timestamptz(6)
+  /// When the step was escalated to the approver's line manager and the
+  /// administrators watching the control room, two working days past its
+  /// deadline. Cleared with breachNotifiedAt when the step moves.
+  escalatedAt          DateTime?         @map("escalated_at") @db.Timestamptz(6)
+  endedAt              DateTime?         @map("ended_at") @db.Timestamptz(6)
+  /// The workflow policy this cycle runs under, recorded when it started
+  /// (see `lib/runPolicy`). A memo keeps the rules it began with; a later
+  /// policy change reaches it only when an administrator applies it to
+  /// memos in progress. Null `policyFrozenAt` is a cycle started before this
+  /// was recorded, which follows the current policy.
+  policyFrozenAt          DateTime? @map("policy_frozen_at") @db.Timestamptz(6)
+  /// Working days for a step that names no deadline; null is "no deadline".
+  policySlaDefaultDays    Int?      @map("policy_sla_default_days")
+  policyAllowStepSkip     Boolean?  @map("policy_allow_step_skip")
+  policySealApprovedMemos Boolean?  @map("policy_seal_approved_memos")
+  actions              ApprovalAction[]
+  currentForDocument   Document?         @relation("DocumentCurrentWorkflowRun")
+  notifications        Notification[]
+  chain                ApprovalChain     @relation(fields: [chainId], references: [id])
+  document             Document          @relation("DocumentWorkflowRuns", fields: [documentId], references: [id])
+  documentVersion      DocumentVersion   @relation(fields: [documentVersionId], references: [id])
+
+  @@index([documentId])
+  @@index([documentVersionId])
+  @@index([chainId])
+  @@index([status])
+  @@index([documentId, status])
+  /// For the sweep that looks for steps running over.
+  @@index([status, currentStepStartedAt])
+  @@map("workflow_runs")
+}
+
+/// Append-only action history. Never update or delete rows.
+model ApprovalAction {
+  id                   String             @id @default(uuid()) @db.Uuid
+  workflowRunId        String             @map("workflow_run_id") @db.Uuid
+  chainStepId          String             @map("chain_step_id") @db.Uuid
+  documentVersionId    String             @map("document_version_id") @db.Uuid
+  actorId              String             @map("actor_id") @db.Uuid
+  /// Set when the actor signed under a delegation: the person whose step it
+  /// is. The actor is always whoever actually put their signature on the
+  /// page - this says on whose behalf, and both names are shown together.
+  onBehalfOfId         String?            @map("on_behalf_of_id") @db.Uuid
+  approvalType         ApprovalType       @map("approval_type")
+  action               ApprovalActionType
+  comment              String?
+  signaturePage        Int?               @map("signature_page")
+  signatureX           Float?             @map("signature_x")
+  signatureY           Float?             @map("signature_y")
+  signatureWidth       Float?             @map("signature_width")
+  signatureHeight      Float?             @map("signature_height")
+  signedPdfStoragePath String?            @map("signed_pdf_storage_path") @db.VarChar(1024)
+  /// SHA-256 of that artefact. One approver's signature, over one set of
+  /// bytes, recorded at the moment it was written.
+  signedPdfChecksum    String?            @map("signed_pdf_checksum") @db.VarChar(64)
+  ipAddress            String?            @map("ip_address") @db.VarChar(45)
+  createdAt            DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  actor                User               @relation(fields: [actorId], references: [id])
+  onBehalfOf           User?              @relation("ApprovalActionOnBehalfOf", fields: [onBehalfOfId], references: [id])
+  chainStep            ApprovalChainStep  @relation(fields: [chainStepId], references: [id])
+  documentVersion      DocumentVersion    @relation(fields: [documentVersionId], references: [id])
+  workflowRun          WorkflowRun        @relation(fields: [workflowRunId], references: [id])
+  revisionForDocument  Document?          @relation("DocumentRevisionRequestedBy")
+
+  @@index([workflowRunId])
+  @@index([chainStepId])
+  @@index([documentVersionId])
+  @@index([actorId])
+  @@index([onBehalfOfId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("approval_actions")
+}
+
+model Notification {
+  id            String           @id @default(uuid()) @db.Uuid
+  recipientId   String           @map("recipient_id") @db.Uuid
+  type          NotificationType
+  title         String           @db.VarChar(500)
+  message       String
+  documentId    String?          @map("document_id") @db.Uuid
+  workflowRunId String?          @map("workflow_run_id") @db.Uuid
+  isRead        Boolean          @default(false) @map("is_read")
+  readAt        DateTime?        @map("read_at") @db.Timestamptz(6)
+  createdAt     DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  document      Document?        @relation(fields: [documentId], references: [id])
+  recipient     User             @relation(fields: [recipientId], references: [id])
+  workflowRun   WorkflowRun?     @relation(fields: [workflowRunId], references: [id])
+
+  @@index([recipientId])
+  @@index([recipientId, isRead])
+  @@index([documentId])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+/// Immutable audit trail for all important system operations.
+model AuditLog {
+  id         String      @id @default(uuid()) @db.Uuid
+  actorId    String?     @map("actor_id") @db.Uuid
+  action     AuditAction
+  entityType String      @map("entity_type") @db.VarChar(100)
+  entityId   String      @map("entity_id") @db.Uuid
+  oldValue   Json?       @map("old_value")
+  newValue   Json?       @map("new_value")
+  ipAddress  String?     @map("ip_address") @db.VarChar(45)
+  userAgent  String?     @map("user_agent") @db.VarChar(500)
+  createdAt  DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  /// The order this row was WRITTEN in, from a sequence, so it is fixed the
+  /// moment the row exists rather than when it is sealed.
+  ///
+  /// `created_at` cannot do this job: it defaults to now(), which in Postgres
+  /// is the transaction's start time, so every row one transaction writes
+  /// shares it exactly. `seq` cannot either - it is null until the sealer
+  /// runs. Between them a memo's new version and the submission that acted on
+  /// it were indistinguishable, and the sealer was breaking that tie with a
+  /// random uuid: the hash chain fixed history in an order decided by chance.
+  writeSeq BigInt    @unique @default(autoincrement()) @map("write_seq")
+  /// Position in the hash chain. Assigned when the row is sealed, which is a
+  /// sweep shortly after the row is written - never in the transaction that
+  /// wrote it, because chaining has to be serialised and an approval must not
+  /// wait behind somebody else's audit write. Null means written, not yet
+  /// sealed. Unique because two rows sharing a position is the one thing the
+  /// chain cannot survive, and that is the database's job to refuse.
+  seq      BigInt?   @unique @map("seq")
+  /// SHA-256 over this row's content and the hash before it, hex.
+  hash     String?   @map("hash") @db.VarChar(64)
+  prevHash String?   @map("prev_hash") @db.VarChar(64)
+  sealedAt DateTime? @map("sealed_at") @db.Timestamptz(6)
+
+  actor User? @relation(fields: [actorId], references: [id])
+
+  @@index([actorId])
+  @@index([action])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  /// For the sealer, which asks for the oldest rows that have no position yet,
+  /// in the order they were written.
+  @@index([seq, writeSeq])
+  @@map("audit_logs")
+}
+
+/// A witness to where the chain had reached, kept apart from the chain itself.
+///
+/// A hash chain catches a record that was edited or removed from the middle,
+/// because everything after it stops agreeing. It cannot, on its own, catch
+/// records cut off the end: delete the last three and what is left is a
+/// shorter chain that verifies perfectly. One row is written here every time
+/// a batch is sealed, and never updated, so the end of the chain is recorded
+/// in a second place. Truncating the trail now means editing both, and a
+/// chain rewritten from some point in the middle disagrees with every witness
+/// taken after it.
+/// One sign-in, kept so it can be ended.
+///
+/// The refresh token itself is never stored - only its SHA-256. A database
+/// dump must not be a drawer full of live sessions, and a hash is enough to
+/// recognise the token somebody presents while being useless to anyone who
+/// reads the table.
+model RefreshSession {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash") @db.VarChar(64)
+  issuedAt  DateTime  @default(now()) @map("issued_at") @db.Timestamptz(6)
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  /// Set when the session is ended - by signing out, by rotation, or by an
+  /// administrator. Kept rather than deleted so "signed out at 14:02" is a
+  /// fact somebody can still read.
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(6)
+  /// Set, beside `revokedAt`, when this session ended because its token was
+  /// exchanged for a new one. Only a token ended this way coming back means
+  /// somebody else holds a copy; one ended by signing out does not.
+  rotatedAt DateTime? @map("rotated_at") @db.Timestamptz(6)
+  userAgent String?   @map("user_agent") @db.VarChar(500)
+  ipAddress String?   @map("ip_address") @db.VarChar(45)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("refresh_sessions")
+}
+
+model LedgerCheckpoint {
+  id       String   @id @default(uuid()) @db.Uuid
+  /// The last position sealed in that batch, and its digest.
+  seq      BigInt   @unique
+  hash     String   @db.VarChar(64)
+  sealedAt DateTime @default(now()) @map("sealed_at") @db.Timestamptz(6)
+
+  @@index([sealedAt])
+  @@map("ledger_checkpoints")
+}
+
+model DocumentComment {
+  id         String   @id @default(uuid()) @db.Uuid
+  documentId String   @map("document_id") @db.Uuid
+  authorId   String   @map("author_id") @db.Uuid
+  comment    String
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  document Document @relation(fields: [documentId], references: [id])
+  author   User     @relation(fields: [authorId], references: [id])
+
+  @@index([documentId])
+  @@index([authorId])
+  @@index([documentId, createdAt])
+  @@map("document_comments")
+}
+
+enum LoginRole {
+  ADMINISTRATOR
+  USER
+}
+
+enum ApprovalType {
+  REVIEWER
+  APPROVER
+  FINAL_APPROVER
+}
+
+enum DocumentStatus {
+  DRAFT
+  PENDING_REVIEW
+  REVISION_REQUESTED
+  REJECTED
+  APPROVED
+  DELETED
+}
+
+enum WorkflowRunStatus {
+  IN_PROGRESS
+  APPROVED
+  REJECTED
+  SUPERSEDED
+}
+
+enum ApprovalActionType {
+  APPROVE
+  REQUEST_REVISION
+  REJECT
+  SKIP
+}
+
+/// One email waiting to go out, or the record of one that did.
+///
+/// Written in the same transaction as the notification it carries, so a memo
+/// that reached somebody's queue and a notice that never left the building
+/// cannot disagree: either both are committed or neither is. Sending is a
+/// separate act afterwards, which is why the row has a status and a count of
+/// attempts rather than being fired and forgotten.
+model EmailMessage {
+  id             String      @id @default(uuid()) @db.Uuid
+  recipientEmail String      @map("recipient_email") @db.VarChar(255)
+  recipientId    String?     @map("recipient_id") @db.Uuid
+  subject        String      @db.VarChar(500)
+  body           String
+  status         EmailStatus @default(PENDING)
+  attempts       Int         @default(0)
+  lastError      String?     @map("last_error")
+  /// The memo it is about, where it is about one - so "was Bilal told?" is a
+  /// question the ledger can answer against the document.
+  documentId     String?     @map("document_id") @db.Uuid
+  notificationId String?     @map("notification_id") @db.Uuid
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  claimedAt      DateTime?   @map("claimed_at") @db.Timestamptz(6)
+  sentAt         DateTime?   @map("sent_at") @db.Timestamptz(6)
+
+  recipient User?     @relation(fields: [recipientId], references: [id])
+  document  Document? @relation(fields: [documentId], references: [id])
+
+  @@index([status, createdAt])
+  @@index([documentId])
+  @@map("email_messages")
+}
+
+enum EmailStatus {
+  PENDING
+  /// Claimed by a dispatcher and being handed to the mail server. A row left
+  /// here by a process that died is reclaimed after `claimedAt` goes stale -
+  /// which is also why the claim is a status change rather than a lock: two
+  /// API processes sweeping the same queue must not both send the same notice.
+  SENDING
+  SENT
+  /// Tried the agreed number of times and refused every time. Kept, with the
+  /// last error on it, because "nobody was told" is a support question.
+  FAILED
+  /// Too old to be worth delivering. An approval notice a week late is not a
+  /// notice, it is confusion - this is what stops a mail server coming back
+  /// after an outage and posting a fortnight of stale queues at once.
+  EXPIRED
+}
+
+enum NotificationType {
+  APPROVAL_NEEDED
+  /// Somebody wrote on the memo's thread without acting on it - a question
+  /// before signing, most often. Silent until this existed, which made the
+  /// thread a conversation nobody was told about.
+  COMMENT_ADDED
+  APPROVAL_OVERDUE
+  /// Somebody waiting on a memo asked the person holding it to look at it.
+  /// Distinct from APPROVAL_OVERDUE, which the deadline sweep sends once and
+  /// only when a step has actually run over: a memo can be sitting for a
+  /// week with no deadline set on it at all, and this is what the preparer
+  /// has instead of walking down the corridor.
+  APPROVAL_REMINDER
+  REVISION_REQUESTED
+  REJECTED
+  APPROVED
+  RESUBMITTED
+  DOCUMENT_DELETED
+  /// Somebody's approvals were handed to somebody else, or handed back. Sent
+  /// to both people it concerns and never to whoever performed it - an
+  /// administrator arranging cover for two other people is the case this
+  /// exists for, and the one that used to be silent.
+  DELEGATION_STARTED
+  DELEGATION_ENDED
+  /// The preparer moved the memo past somebody without their signature. News
+  /// for the person passed over, not a request: there is nothing left for
+  /// them to do on it, which is exactly what APPROVAL_NEEDED implied.
+  STEP_SKIPPED
+  /// The step was moved to a different approver. Sent to the person it was
+  /// taken from and to the preparer watching it; the person it was moved TO
+  /// gets an ordinary APPROVAL_NEEDED, because for them it is work.
+  ///
+  /// Distinct from STEP_SKIPPED, which says the memo moved on with nobody
+  /// signing that step at all. Here the approval is still required - it is
+  /// being asked of somebody who can actually give it.
+  STEP_REASSIGNED
+  /// The protection on an account changed: the second factor turned off or
+  /// reset, a recovery code spent, a password changed. The trail recorded all
+  /// of these already; nobody told the person whose account it was, which is
+  /// the half that matters while it is still happening.
+  SECURITY_ALERT
+  /// The preparer's receipt: their memo went in.
+  SUBMITTED
+  /// Well past its deadline: told to the approver's line manager and to the
+  /// administrators who watch the control room.
+  ESCALATED
+}
+
+/// One person's approvals handed to another while they are away.
+///
+/// A row here is an authorisation: while it is active, the delegate may act on
+/// a step assigned to the delegator, and the approval records both names. It is
+/// never edited - it is revoked, and a new one written - so the record of who
+/// could sign for whom, and between which dates, survives the arrangement
+/// ending.
+model Delegation {
+  id          String    @id @default(uuid()) @db.Uuid
+  delegatorId String    @map("delegator_id") @db.Uuid
+  delegateId  String    @map("delegate_id") @db.Uuid
+  startsAt    DateTime  @default(now()) @map("starts_at") @db.Timestamptz(6)
+  /// The last moment it applies. Null means until it is revoked, which is the
+  /// open-ended case - somebody on indefinite leave.
+  endsAt      DateTime? @map("ends_at") @db.Timestamptz(6)
+  reason      String?   @db.VarChar(500)
+  /// The memo types it covers. Empty is every memo - full cover, the
+  /// default. "UPLOADED" stands for a memo uploaded as a PDF.
+  memoTypes   String[]  @default([]) @map("memo_types")
+  createdById String    @map("created_by_id") @db.Uuid
+  revokedAt   DateTime? @map("revoked_at") @db.Timestamptz(6)
+  revokedById String?   @map("revoked_by_id") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  delegator User  @relation("DelegationDelegator", fields: [delegatorId], references: [id])
+  delegate  User  @relation("DelegationDelegate", fields: [delegateId], references: [id])
+  createdBy User  @relation("DelegationCreatedBy", fields: [createdById], references: [id])
+  revokedBy User? @relation("DelegationRevokedBy", fields: [revokedById], references: [id])
+
+  @@index([delegatorId, revokedAt])
+  @@index([delegateId, revokedAt])
+  @@map("delegations")
+}
+
+enum MailProvider {
+  SMTP
+  MICROSOFT_GRAPH
+}
+
+enum AuditAction {
+  SESSION_ENDED
+  SESSIONS_ENDED_EVERYWHERE
+  USER_CREATED
+  USER_UPDATED
+  /// Removing an account had no action at all, not even an unused one.
+  USER_DELETED
+  /// The account was switched off, or switched back on. Its own pair of
+  /// actions rather than a USER_UPDATED carrying a changed field, because the
+  /// change history is read to answer "who can still get in" and a row that
+  /// says "user updated" answers it only to somebody who opens the payload.
+  USER_DEACTIVATED
+  USER_REACTIVATED
+  PASSWORD_RESET
+  DEPARTMENT_CREATED
+  DEPARTMENT_UPDATED
+  DEPARTMENT_DELETED
+  SIGNATURE_UPLOADED
+  SIGNATURE_DEACTIVATED
+  DOCUMENT_CREATED
+  DOCUMENT_UPDATED
+  DOCUMENT_SUBMITTED
+  DOCUMENT_VERSION_UPLOADED
+  APPROVAL_CHAIN_CREATED
+  WORKFLOW_APPROVED
+  WORKFLOW_REVISION_REQUESTED
+  WORKFLOW_REJECTED
+  WORKFLOW_STEP_SKIPPED
+  WORKFLOW_COMPLETED
+  DOCUMENT_DELETED
+  DOCUMENT_DOWNLOADED
+  DOCUMENT_VIEWED
+  DOCUMENT_PRINTED
+  /// One per signature applied - preparer or approver - with how it was made,
+  /// when the signer confirmed it was them, and the statement they agreed to.
+  DOCUMENT_SIGNED
+  NOTIFICATION_CREATED
+  EMAIL_SENT
+  DELEGATION_CREATED
+  DELEGATION_REVOKED
+  WORKFLOW_STEP_OVERDUE
+  /// Who asked whom to look at a memo, and when. The trail is what makes the
+  /// cooldown honest - the server reads its own last entry to decide whether
+  /// another reminder may be sent yet.
+  APPROVAL_REMINDER_SENT
+  /// The reusable chain a memo can be submitted against: made, rewritten,
+  /// removed. Three actions rather than one, because "who changed the route
+  /// every memo of this kind travels, and when" is a question an update filed
+  /// as a create cannot answer - the history of a template read as though it
+  /// had been created three times.
+  ///
+  /// They replace APPROVAL_CHAIN_CREATED and DOCUMENT_DELETED, which is what
+  /// these three writes used to borrow. Neither was close: the first means a
+  /// chain was built on a document, and the second put "Document Deleted" in
+  /// the trail for something that is not a document at all.
+  WORKFLOW_TEMPLATE_CREATED
+  WORKFLOW_TEMPLATE_UPDATED
+  /// Kept for the rows already written: templates are no longer deleted.
+  WORKFLOW_TEMPLATE_DELETED
+  /// Retired and restored. What replaced deleting.
+  WORKFLOW_TEMPLATE_ARCHIVED
+  WORKFLOW_TEMPLATE_RESTORED
+  /// An in-flight step was moved from one approver to another: who moved it,
+  /// off whom, onto whom and why.
+  ///
+  /// The only action in the system that changes who is entitled to sign a
+  /// memo after it was submitted, which is why all four are in the row. The
+  /// chain itself cannot answer "who was this with before" - the step's
+  /// assignment is a single column and reassigning overwrites it - so
+  /// without this row the change leaves no trace anywhere.
+  WORKFLOW_STEP_REASSIGNED
+  MAIL_SETTINGS_UPDATED
+  MAIL_SETTINGS_CLEARED
+  WORKFLOW_SETTINGS_UPDATED
+  WORKFLOW_SETTINGS_CLEARED
+  SSO_SETTINGS_UPDATED
+  SSO_SETTINGS_CLEARED
+  /// The paper or margins a generated memo is drawn on changed. Its own
+  /// action because "why does this memo look different from that one" is
+  /// asked about a document, and this is the row that answers it.
+  PAGE_SETUP_UPDATED
+  /// The standard wording an administrator keeps for preparers to insert.
+  /// Its own actions, because "who changed the recommendation paragraph and
+  /// when" is asked about the memos that carry it.
+  MEMO_CLAUSE_CREATED
+  MEMO_CLAUSE_UPDATED
+  MEMO_CLAUSE_ARCHIVED
+  MEMO_CLAUSE_RESTORED
+  MEMO_DICTIONARY_WORD_ADDED
+  MEMO_DICTIONARY_WORD_REMOVED
+  TWO_FACTOR_ENABLED
+  TWO_FACTOR_DISABLED
+  TWO_FACTOR_RESET
+  TWO_FACTOR_RECOVERY_USED
+  /// Who got in, who tried and failed, and when the sign-in limit refused
+  /// somebody. Kept out of Change history, which would otherwise be mostly
+  /// sign-ins; they are in the sealed trail and the export.
+  SIGN_IN_SUCCEEDED
+  SIGN_IN_FAILED
+  SIGN_IN_THROTTLED
+  /// A sign-in token already exchanged came back after the grace period, so
+  /// somebody else holds a copy. Every session on the account was ended.
+  REFRESH_TOKEN_REUSED
+  SIGNATURE_SAVED
+  SIGNATURE_REMOVED
+  LEDGER_EXPORTED
+  ADMIN_POWERS_CHANGED
+  SUPER_ADMIN_TRANSFERRED
+  WORKFLOW_STEP_ESCALATED
+  /// The office calendar deadlines are counted on.
+  HOLIDAY_ADDED
+  HOLIDAY_REMOVED
+  OFFICE_TIME_ZONE_CHANGED
+  /// Its preparer withdrew it, with a reason. Replaces DOCUMENT_DELETED,
+  /// which is kept for the rows already written.
+  DOCUMENT_WITHDRAWN
+  /// An administrator cancelled an abandoned memo, with a reason.
+  DOCUMENT_CANCELLED
+  /// Its preparer left a rejected memo as rejected, closing it for good
+  /// rather than resubmitting it.
+  REJECTION_CLOSED
+  /// The approval route a memo type starts from was set or cleared.
+  MEMO_TYPE_ROUTE_CHANGED
+}
+
+/// The mail server this deployment sends through.
+///
+/// One row, always, so that "what is this system configured to do" has one
+/// answer rather than a history to reduce. The environment variables still
+/// work and are still the right place for a deployment that manages its
+/// configuration that way - this row wins when it exists, because an
+/// administrator who fills in the form expects the form to be what happens.
+/// Signing in with a Microsoft work account.
+///
+/// A SECOND app registration, unrelated to the one in MailSetting. That one is
+/// app-only - it holds Mail.Send, never sees a browser and has no redirect URI.
+/// This is a delegated sign-in that redirects back here. They are different
+/// registrations with different permissions, and the screen says so, because
+/// pasting one into the other is the obvious mistake to make.
+model SsoSetting {
+  /// Always `singleton`, as in MailSetting.
+  id                 String   @id @db.VarChar(16)
+  /// Off until it is configured AND somebody switches it on. The sign-in
+  /// button is drawn from this, and a button that cannot work sits on the one
+  /// screen nobody can get past.
+  enabled            Boolean  @default(false)
+  tenantId           String?  @map("tenant_id") @db.VarChar(100)
+  clientId           String?  @map("client_id") @db.VarChar(100)
+  /// AES-256-GCM via lib/secretBox. Never returned to any client.
+  clientSecretCipher String?  @map("client_secret_cipher")
+  /// Exactly as registered in Entra, because Entra compares it literally.
+  redirectUri        String?  @map("redirect_uri") @db.VarChar(2048)
+  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedById        String?  @map("updated_by_id") @db.Uuid
+
+  updatedBy User? @relation(fields: [updatedById], references: [id])
+
+  @@map("sso_settings")
+}
+
+/// One sign-in attempt, from the browser leaving to the session being handed
+/// back.
+///
+/// Server-side because the two halves are different requests and this
+/// application has no cookies - it is bearer tokens throughout. One row rather
+/// than two tables, because it is one event: `state`, `codeVerifier` and
+/// `nonce` are what the callback proves the round trip with, and `userId` and
+/// `codeHash` are written once it has.
+model SsoLogin {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Round-tripped through Microsoft. Stops a callback nothing here started.
+  state        String    @unique @db.VarChar(64)
+  codeVerifier String    @map("code_verifier") @db.VarChar(128)
+  /// Must appear in the id_token, or a token from another sign-in replays.
+  nonce        String    @db.VarChar(64)
+  /// Both null until the callback knows who this is.
+  userId       String?   @map("user_id") @db.Uuid
+  /// SHA-256 of the handover code. The table holds no plaintext way in.
+  codeHash     String?   @unique @map("code_hash") @db.VarChar(64)
+  expiresAt    DateTime  @map("expires_at") @db.Timestamptz(6)
+  /// Set the instant it is spent, so a replay finds it and is refused.
+  consumedAt   DateTime? @map("consumed_at") @db.Timestamptz(6)
+  /// "sign-in", or "step-up": a fresh Microsoft sign-in made by somebody
+  /// already signed in, to confirm it is them before a sensitive action.
+  purpose      String    @default("sign-in") @db.VarChar(16)
+  /// For a step-up, who started it. The Microsoft account that comes back
+  /// must be this person's, or the confirmation is refused.
+  forUserId    String?   @map("for_user_id") @db.Uuid
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@map("sso_logins")
+}
+
+/// The way back in when the phone is gone.
+///
+/// Single-use, and hashed the way a password is not: these are 80 bits out of
+/// a generator rather than something a person chose, so there is nothing for a
+/// dictionary to attack. A scrypt derivation per code would put ten of them on
+/// the critical path of every sign-in.
+model TotpRecoveryCode {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  codeHash  String    @unique @map("code_hash") @db.VarChar(64)
+  /// Set the instant it is spent. The row is kept rather than deleted so the
+  /// screen can say how many are left, which is what tells somebody it is
+  /// time to generate a new set.
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("totp_recovery_codes")
+}
+
+/// A sign-in that has passed the password and not yet passed the code.
+///
+/// A row rather than a signed token because a token cannot count attempts, and
+/// six digits is a space of one million - small enough that the per-challenge
+/// cap is the real defence and the rate limiter is only the backstop.
+///
+/// Holding one is worth nothing on its own: the password has been proven, the
+/// second factor has not, and no session exists until it is.
+model TotpChallenge {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  /// SHA-256 of the challenge, never the challenge. It travels to the browser
+  /// and back, so the table never holds the live value.
+  codeHash   String    @unique @map("code_hash") @db.VarChar(64)
+  /// The challenge dies on the fifth guess, which costs an attacker a fresh
+  /// password-verified sign-in for every five tries at the digits.
+  attempts   Int       @default(0)
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(6)
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(6)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@map("totp_challenges")
+}
+
+/// Workflow policy an administrator can change without a shell.
+///
+/// The two decisions here are the organisation's, not the product's, and
+/// neither has a defensible default: a deadline nobody set is not a deadline
+/// missed, and a bypass in the hands of the person who most wants the memo
+/// through is the one hole the workflow's claim cannot survive. So both are
+/// off until somebody says otherwise, and saying so is an audited act.
+model WorkflowSetting {
+  /// Always `singleton`, exactly as in MailSetting: the primary key is what
+  /// keeps there being one row, and nothing derives meaning from the value.
+  id             String   @id @db.VarChar(16)
+  /// Working days an approver is given before the sweep chases them, for
+  /// steps that name no deadline of their own.
+  ///
+  /// Null means no deadline at all - the queue goes on showing age, `dueAt`
+  /// stays null, and nobody is chased. That is a real policy and the default
+  /// one, not a missing value waiting on a fallback.
+  slaDefaultDays Int?     @map("sla_default_days")
+  /// May a preparer pass over an approver who has not acted?
+  allowStepSkip  Boolean  @default(false) @map("allow_step_skip")
+  /// Does submitting a document also mean signing it?
+  ///
+  /// True is how this has always worked and stays the default: the preparer
+  /// signs at the moment of submission and takes the first column of a typed
+  /// memo's printed strip. An organisation whose submitters are forwarding a
+  /// document for approval rather than authoring it turns this off, and then
+  /// nobody signs until the first approver does.
+  ///
+  /// A memo type may override it either way; this is what answers for an
+  /// uploaded document, which has no type to ask.
+  preparerSignsOnSubmit Boolean @default(true) @map("preparer_signs_on_submit")
+  /// Does the final approval seal the approved PDF with the organisation's
+  /// digital certificate?
+  ///
+  /// True by default, and only meaningful where a certificate is configured
+  /// (`SEAL_P12_PATH`): with none, nothing is sealed whatever this says. Off,
+  /// memos are still signed, certified and fingerprinted - the PDF just does
+  /// not carry the seal.
+  sealApprovedMemos Boolean @default(true) @map("seal_approved_memos")
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedById    String?  @map("updated_by_id") @db.Uuid
+
+  updatedBy User? @relation(fields: [updatedById], references: [id])
+
+  @@map("workflow_settings")
+}
+
+/// A memo being written, before it is submitted.
+///
+/// Not an artefact. Nothing here is written to STORAGE_DIR, nothing is
+/// digested, and every column is freely updatable - which is the whole
+/// difference between a draft and a version. A draft becomes a document at
+/// submission and is deleted in the same transaction; until then it exists
+/// only for the person writing it.
+///
+/// It replaces a `localStorage` draft that lived in one browser, was lost
+/// when site data was cleared, and could not be picked up on another
+/// machine.
+model MemoDraft {
+  id         String   @id @default(uuid()) @db.Uuid
+  preparerId String   @map("preparer_id") @db.Uuid
+  /// Which template this will be drawn with. Null is a draft started before
+  /// a type was chosen.
+  memoType   String?  @map("memo_type") @db.VarChar(64)
+  /// The subject. Named `title` to match the column it becomes.
+  title      String?  @db.VarChar(500)
+  memoTo     String?  @map("memo_to") @db.VarChar(200)
+  memoFrom   String?  @map("memo_from") @db.VarChar(200)
+  /// The date the memo will bear. Held on the draft so a memo written over
+  /// several days keeps the date its author chose rather than silently
+  /// becoming the day they happened to finish it.
+  memoDate   DateTime? @map("memo_date") @db.Date
+  /// The editor's own document, validated against the allowed node set on
+  /// every save - so a draft cannot hold something the template could not
+  /// draw at submission.
+  bodyJson   Json?    @map("body_json")
+  /// Notes placed on the page, as the preparer has them so far.
+  pageNotesJson Json? @map("page_notes_json")
+  /// The chain as picked so far, held as written rather than as rows: it is
+  /// incomplete by nature while somebody is still choosing, and the rules
+  /// that reject an incomplete chain belong at submission.
+  chainJson  Json?    @map("chain_json")
+  templateId String?  @map("template_id") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  preparer User @relation("MemoDraftPreparer", fields: [preparerId], references: [id], onDelete: Cascade)
+
+  @@index([preparerId, updatedAt])
+  @@map("memo_drafts")
+}
+
+/// Whose letterhead the generated memos carry.
+///
+/// One row, like the other settings tables. It exists so that the organisation
+/// name printed on a memo is configuration rather than a constant compiled
+/// into the renderer; the logo falls back to the asset shipped in
+/// `backend/assets/brand/` when no path is set here.
+model BrandingSetting {
+  /// Always `singleton`. The primary key is what keeps there being one row.
+  id               String   @id @db.VarChar(16)
+  organisationName String   @map("organisation_name") @db.VarChar(200)
+  /// A logo uploaded to STORAGE_DIR. Null uses the packaged one.
+  logoStoragePath  String?  @map("logo_storage_path") @db.VarChar(1024)
+
+  /// The paper a memo is drawn on: "A4" or "LETTER". Null is the default, A4.
+  pagePaper        String?  @map("page_paper") @db.VarChar(16)
+  /// Margins in points. Null on any one of them means the delivered default
+  /// for that edge, so a deployment that has never opened the settings screen
+  /// draws exactly the document it drew before page setup existed.
+  ///
+  /// Left and right are separate on purpose: an organisation that files memos
+  /// in a punched binder needs a wider gutter on one side only.
+  pageMarginLeft   Float?   @map("page_margin_left")
+  pageMarginRight  Float?   @map("page_margin_right")
+  pageMarginTop    Float?   @map("page_margin_top")
+  pageMarginBottom Float?   @map("page_margin_bottom")
+
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedById      String?  @map("updated_by_id") @db.Uuid
+
+  updatedBy User? @relation(fields: [updatedById], references: [id])
+
+  @@map("branding_settings")
+}
+
+model MailSetting {
+  /// Always `singleton`. The primary key is what keeps there being one row;
+  /// nothing derives meaning from the value.
+  id                 String       @id @db.VarChar(16)
+  /// How a notice actually leaves the building.
+  ///
+  /// Graph is the one to prefer on Microsoft 365: it hands the message to
+  /// Exchange Online directly, so SPF and DKIM are the tenant's business
+  /// rather than a DNS record this deployment has to get right. SMTP stays
+  /// for everyone else, and for a developer with a sink on a spare port.
+  provider           MailProvider @default(SMTP)
+  /// SMTP only. Null under Graph, which has no host to point at - which is
+  /// also why these stopped being NOT NULL.
+  host               String?      @db.VarChar(255)
+  port               Int?
+  secure             Boolean      @default(false)
+  /// Split from the address it used to be glued to. Graph wants the two
+  /// separately, and "Ideas Flow <no-reply@ideas.com.pk>" is not an address
+  /// any API will accept as one.
+  fromName           String?      @map("from_name") @db.VarChar(255)
+  fromAddress        String       @map("from_address") @db.VarChar(320)
+  username           String?      @db.VarChar(255)
+  /// AES-256-GCM, keyed from JWT_SECRET - see lib/secretBox. Never the
+  /// password itself, and never returned to any client.
+  passwordCipher     String?      @map("password_cipher")
+  /// Microsoft Graph, app-only. The directory the application lives in and
+  /// the application itself: identifiers rather than secrets, but still only
+  /// ever returned masked - together they name a target.
+  tenantId           String?      @map("tenant_id") @db.VarChar(100)
+  clientId           String?      @map("client_id") @db.VarChar(100)
+  /// The one true secret here, and it never leaves this row unencrypted or
+  /// this process at all.
+  clientSecretCipher String?      @map("client_secret_cipher")
+  /// The mailbox Graph sends as.
+  ///
+  /// Its own field rather than assumed from `fromAddress`, because the
+  /// application permission that lets this send is tenant-wide: the token can
+  /// address any mailbox in the directory. Naming one here is not the control
+  /// - that is an Exchange application access policy - but it does mean the
+  /// application cannot be talked into using another one.
+  graphMailbox       String?      @map("graph_mailbox") @db.VarChar(320)
+  /// Whether a sent notice lands in that mailbox's Sent Items. On, because a
+  /// mail nobody can find afterwards is a support question nobody can answer.
+  saveToSentItems    Boolean      @default(true) @map("save_to_sent_items")
+  /// Where the links in a notice point. Its own field rather than an
+  /// environment variable because getting it wrong is invisible: mail sends
+  /// perfectly and every approver receives a link to somebody else's laptop.
+  appUrl             String?      @map("app_url") @db.VarChar(2048)
+  updatedAt          DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedById        String?      @map("updated_by_id") @db.Uuid
+
+  updatedBy User? @relation(fields: [updatedById], references: [id])
+
+  @@map("mail_settings")
+}
+
+/// A public holiday: not a working day when a deadline is counted.
+///
+/// Kept by an administrator, because nothing here can know them - Eid moves
+/// every year and differs by country. Past ones are kept, so a deadline
+/// already counted over one can be explained later.
+model PublicHoliday {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  date        DateTime @unique @db.Date
+  name        String   @db.VarChar(120)
+  createdById String?  @map("created_by_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  createdBy User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@map("public_holidays")
+}
+
+/// The office's time zone: a deadline ends at the end of the working day
+/// there. One row, id "default". Absent, OFFICE_TIME_ZONE or UTC answers.
+model CalendarSetting {
+  id          String   @id @db.VarChar(16)
+  timeZone    String   @map("time_zone") @db.VarChar(64)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedById String?  @map("updated_by_id") @db.Uuid
+
+  updatedBy User? @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@map("calendar_settings")
+}
+
+/// The approval route a kind of memo starts from: the workflow template the
+/// submit screen pre-selects for it. One row per memo type key, plus
+/// "UPLOADED" for a memo uploaded as a PDF. No row, or a null template, is no
+/// pre-selection. Kept by administrators who manage workflows.
+model MemoTypeRoute {
+  memoType    String            @id @map("memo_type") @db.VarChar(64)
+  templateId  String?           @map("template_id") @db.Uuid
+  updatedById String?           @map("updated_by_id") @db.Uuid
+  updatedAt   DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  template    WorkflowTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+
+  @@map("memo_type_routes")
+}

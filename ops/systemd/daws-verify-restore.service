@@ -1,0 +1,19 @@
+[Unit]
+Description=DAWS restore drill (restores the newest backup into a throwaway database)
+After=network-online.target postgresql.service
+
+[Service]
+Type=oneshot
+User=daws
+EnvironmentFile=/etc/daws/backup.env
+
+# The newest backup, whichever that is. Failing loudly is the point: a
+# non-zero exit is what systemd reports and what a monitor should watch.
+ExecStart=/bin/bash -c '/opt/daws/ops/daws-verify-restore.sh "$(ls -1d "$BACKUP_DIR"/20*Z | tail -1)"'
+
+TimeoutStartSec=90min
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

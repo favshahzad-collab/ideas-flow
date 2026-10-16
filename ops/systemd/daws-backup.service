@@ -1,0 +1,30 @@
+[Unit]
+Description=DAWS backup (database, files, ledger tip)
+# The database has to be there. If it is not, the timer will try again
+# tomorrow rather than writing a backup of nothing.
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=daws
+
+# Everything the script needs. Keep this file readable only by root: it names
+# the database and, if the ledger tip is being recorded, holds a token.
+EnvironmentFile=/etc/daws/backup.env
+
+ExecStart=/opt/daws/ops/daws-backup.sh
+
+# A backup that hangs must not sit there holding a lock until somebody
+# notices. Ninety minutes is far beyond a real run; it is a backstop.
+TimeoutStartSec=90min
+
+# Nothing here needs to write anywhere but the backup directory.
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+NoNewPrivileges=true
+ReadWritePaths=/var/backups/daws
+
+[Install]
+WantedBy=multi-user.target

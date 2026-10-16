@@ -1,0 +1,22 @@
+{
+  // The seeds live in `prisma/`, which the build deliberately does not
+  // include - they are scripts, not server code, and emitting them into
+  // `dist/` would ship the demo fixtures with the API.
+  //
+  // The cost of that exclusion was that they were never type-checked at all:
+  // `seed-demo.ts` passed `tsc` while handing a Buffer to a function that
+  // wanted a Multer file, and only failed at runtime. This checks them
+  // without emitting anything.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // The seeds reach into `src/lib`, which touches `Express.Multer.File`.
+    // Without express and multer here the namespace is unresolved and the
+    // whole check fails on a file the build compiles happily.
+    "types": ["node", "express", "multer"]
+  },
+  // `scripts/` is here for the same reason: benchmarks and one-off tools are
+  // not server code and are not emitted, and an unchecked script is one that
+  // rots quietly until the day somebody needs it.
+  "include": ["prisma/**/*.ts", "prisma.config.ts", "scripts/**/*.ts"]
+}

@@ -1,0 +1,16 @@
+-- Administering a person leaves a trace.
+--
+-- `USER_CREATED` and `USER_UPDATED` have been in this enum since the
+-- beginning and nothing ever wrote one. Departments were audited; the people
+-- were not. So an administrator could change somebody's password, change
+-- their email address, or make them an administrator, and the trail held no
+-- row saying so - in a product whose distinguishing claim is a tamper-evident
+-- record of who did what.
+--
+-- The only trace was a SESSIONS_ENDED_EVERYWHERE row, written because the
+-- change ends that person's sessions. It does not say what changed, or that
+-- anything about the account did.
+--
+-- `USER_DELETED` is added because removing an account had no action at all,
+-- not even an unused one.
+ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'USER_DELETED';

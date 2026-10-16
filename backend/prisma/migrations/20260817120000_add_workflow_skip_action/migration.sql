@@ -1,0 +1,5 @@
+-- AlterEnum
+ALTER TYPE "ApprovalActionType" ADD VALUE IF NOT EXISTS 'SKIP';
+
+-- AlterEnum
+ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'WORKFLOW_STEP_SKIPPED';

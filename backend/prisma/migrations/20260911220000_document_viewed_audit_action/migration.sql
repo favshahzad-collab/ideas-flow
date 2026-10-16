@@ -1,0 +1,12 @@
+-- Opening a memo on screen and taking a copy of it away are different acts,
+-- and until now the trail called both of them DOCUMENT_DOWNLOADED. Every
+-- approver who merely read a memo before signing it is recorded as having
+-- downloaded it - in a system whose whole purpose is to be able to say who
+-- holds a copy of somebody's pay or conduct memo, that is the trail saying
+-- something that did not happen.
+--
+-- Rows written before this migration are NOT rewritten. A DOCUMENT_DOWNLOADED
+-- row from before today still means "served, for either reason", and there is
+-- no way to recover which it was - inventing one would be worse than leaving
+-- the ambiguity where it honestly is.
+ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'DOCUMENT_VIEWED';

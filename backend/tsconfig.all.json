@@ -1,0 +1,24 @@
+{
+  // Every TypeScript file in the package, which is more than either build
+  // compiles: `tsconfig.json` excludes the tests (vitest transpiles them, and
+  // including them shipped compiled tests in dist/), and neither build looks
+  // at `prisma/` or this directory's own config files.
+  //
+  // Both the linter and the third `npm run typecheck` pass use it. A
+  // type-aware linter with no project for a file cannot lint it at all - it
+  // reports a parsing error and moves on, which reads like coverage and is
+  // not - and until this was wired into typecheck, `tsc` had never once
+  // looked at a test file.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node", "express", "multer"],
+    // The flat config itself is JavaScript.
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": ["src/**/*", "prisma/**/*.ts", "scripts/**/*.ts", "prisma.config.ts", "*.mjs", "*.mts"],
+  // `exclude` is INHERITED, and the parent excludes the test files - which
+  // silently won over the `include` above and left every test unparseable.
+  "exclude": ["node_modules", "dist"]
+}

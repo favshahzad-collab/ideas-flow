@@ -1,0 +1,56 @@
+# Somebody has to be told when a dependency turns out to be a liability, and
+# it should not be whoever happens to run `npm audit` next.
+#
+# Weekly rather than daily: this is a two-person codebase, and a queue of pull
+# requests nobody has time to read is the same as no alerts at all. Grouped by
+# ecosystem for the same reason - one pull request to review on a Monday
+# beats eleven.
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      backend-minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      # TypeScript 7 is held back by typescript-eslint, not by us.
+      #
+      # typescript-eslint refuses to load against the TS 7.0 API - it throws
+      # on import and takes the whole lint run with it, so adopting 7.0 means
+      # giving up linting entirely rather than accepting a few new findings.
+      # Its tracking issue for TS >= 7.1 is typescript-eslint#10940.
+      #
+      # Everything else about 7.0 was fine here: all three typechecks and the
+      # build passed on it. Lift this the moment typescript-eslint ships
+      # support, and re-run `npm run lint` first - that is the gate that fails.
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      frontend-minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      # Same reason as the backend: typescript-eslint cannot load against the
+      # TS 7.0 API. See the note above.
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
+
+  # The actions in ci.yml are pinned to major tags that move under us. A
+  # compromised action runs with the repository's token, so these matter more
+  # than their small number suggests.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday

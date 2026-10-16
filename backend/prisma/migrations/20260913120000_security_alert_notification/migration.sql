@@ -1,0 +1,17 @@
+-- Tell the owner when the protection on their account changes.
+--
+-- The trail already recorded every one of these: TWO_FACTOR_DISABLED,
+-- TWO_FACTOR_RESET, TWO_FACTOR_RECOVERY_USED, PASSWORD_RESET. But the trail is
+-- a forensic record, read afterwards by an administrator who already has a
+-- reason to look. Nobody told the person whose account it was.
+--
+-- That difference is the whole attack. Somebody holding a stolen session turns
+-- the second factor off, changes the password - and every step is faithfully
+-- written down somewhere nobody is watching. The owner's first sign that
+-- anything happened is being unable to sign in, by which time the session that
+-- did it has had however long it needed.
+--
+-- One type rather than four, because the inbox groups by type and four
+-- near-identical rows would read as four kinds of thing. What happened is in
+-- the message, which is what a person actually reads.
+ALTER TYPE "NotificationType" ADD VALUE IF NOT EXISTS 'SECURITY_ALERT';

@@ -1,0 +1,1554 @@
+@import "tailwindcss";
+
+/*
+  The two faces a memo may be set in besides the app's own, served from
+  public/fonts so the editor shows the memo in the face the page is drawn
+  in. SIL Open Font Licence; the licence sits beside the files. Fetched
+  only when a memo asks for them.
+*/
+@font-face {
+  font-family: 'Liberation Serif';
+  src: url('/fonts/LiberationSerif-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Liberation Serif';
+  src: url('/fonts/LiberationSerif-Italic.ttf') format('truetype');
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Liberation Serif';
+  src: url('/fonts/LiberationSerif-Bold.ttf') format('truetype');
+  font-weight: 600 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Liberation Serif';
+  src: url('/fonts/LiberationSerif-BoldItalic.ttf') format('truetype');
+  font-weight: 600 700;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Liberation Sans';
+  src: url('/fonts/LiberationSans-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Liberation Sans';
+  src: url('/fonts/LiberationSans-Italic.ttf') format('truetype');
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Liberation Sans';
+  src: url('/fonts/LiberationSans-Bold.ttf') format('truetype');
+  font-weight: 600 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Liberation Sans';
+  src: url('/fonts/LiberationSans-BoldItalic.ttf') format('truetype');
+  font-weight: 600 700;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* ============================================================
+   Design tokens
+   Primitive ramps carry no meaning; semantic tokens below map
+   roles onto them. Components must use the SEMANTIC names only,
+   so a palette change is a single edit in this file.
+   ============================================================ */
+
+@theme {
+  /* ============================================================
+     IDENTITY — Ideas Production Management teal
+     ============================================================
+     Two teals, deliberately.
+
+     `accent-mark` is the handoff's #00A98F exactly. It is the brand
+     teal and it is used for MARKS: status dots, stage pips, SLA bars,
+     connectors, the 2px rule on a KPI card, the focus halo, the Live
+     pulse. Nothing ever sets text on it.
+
+     `accent` is the fill that CARRIES A LABEL — primary buttons, the
+     active nav item, the bulk-action strip. It has to be darker:
+     white on #00A98F measures 2.97:1, and a 12.5px button label needs
+     4.5:1 (WCAG 1.4.3). #00806C measures 4.88:1 and still reads as the
+     same teal. The handoff's own accent-active (#007765) sits in this
+     range, so the darker fill is the design's colour, not a new one. */
+  --color-accent-mark: #00a98f;
+
+  --color-accent: #00806c;
+  --color-accent-hover: #006b5b;
+  --color-accent-active: #005647;
+  --color-accent-soft: #e4f7f2;
+  --color-accent-line: #bfede1;
+  /* Text on `accent-soft`. The handoff's #00917A is only 3.54:1 on
+     that tint; this is 5.43:1 on the tint and 6.04:1 on white. */
+  --color-accent-ink: #00705e;
+  --color-on-accent: #ffffff;
+
+  /* Corporate green. Logo and marketing only — never an action.
+
+     The rule is not stylistic: #8cc63f is about 1.9:1 on white, so it cannot
+     carry text, an icon that has to be seen, or a white label on top of it.
+     `deep` and `soft` extend it for the one place it now appears — the
+     sign-in screen's mark and the grounds behind it, where nothing is read
+     against either. The accent ramp stays the interactive colour. */
+  --color-brand: #8cc63f;
+  --color-brand-deep: #5e9e2e;
+  --color-brand-soft: #eef7e2;
+
+  /* --- surfaces --- */
+  --color-canvas: #f9fafb;
+  --color-surface: #ffffff;
+  --color-sunken: #f3f4f6;
+
+  /* Sidebar rail — slate navy. */
+  --color-shell: #0e1729;
+  --color-shell-hover: #1b2740;
+  --color-shell-text: #f9fafb;
+  /* The handoff sets group labels in #4B5563, which is 2.42:1 on the
+     navy — unreadable. Lightened to hold 5.5:1 at the 10px the
+     eyebrow uses. */
+  --color-shell-label: #868e9c;
+  --color-shell-muted: #9ca3af;
+  /* The count pill on a nav row. It carries its own solid ground so it
+     stays legible BOTH on the navy rail and on the teal fill of the
+     active item — a translucent tint vanishes into one or the other.
+     Measured 9.9:1 in both states. */
+  --color-shell-pill: #374151;
+  --color-shell-pill-ink: #f9fafb;
+
+  /*
+     The sign-in screen, and only the sign-in screen.
+
+     A screen-scoped family like `shell-*` and `dark-*`, for the same reason:
+     this one surface has its own palette and putting it on the app's tokens
+     would repaint every other screen. The application is teal because teal is
+     what an action looks like here; the front door is the company's green,
+     because that is what the company looks like.
+
+     From the handoff, with three values moved and one added, all for
+     contrast - the ratios are asserted in `contrast-audit.mjs`:
+
+       - the handoff's `--accent` #4F8A1C carries white at 4.21:1, which is
+         under the bar for a 15px button label. Its own `--accent600` is the
+         fill instead (5.71:1) and `--accent700` is the hover (7.42:1).
+       - `--accent` as TEXT on white is the same 4.21:1, so every word and
+         small label takes `auth-ink` #35600F (7.42:1). `auth-accent` is left
+         for icon strokes and marks, where 3:1 is the bar.
+       - the handoff gives no colour for a control's boundary. `line` at .16
+         alpha measures 1.5:1, and an input whose edge cannot be seen is not
+         an input, so `auth-line-strong` is added at 3.21:1 on the page.
+  */
+  --color-auth-bg: #f3f4f1;
+  --color-auth-surface: #ffffff;
+  --color-auth-text: #182015;
+  /* The handoff's rgba dividers, resolved against the grounds they sit on:
+     a token that is transparent cannot be checked by the audit. */
+  --color-auth-line: #d0d2ce;
+  --color-auth-line-strong: #848a80;
+  --color-auth-accent: #4f8a1c;
+  --color-auth-fill: #407314;
+  --color-auth-fill-hover: #35600f;
+  --color-auth-on-fill: #ffffff;
+  --color-auth-ink: #35600f;
+  /* The quiet tint - the ground behind an icon badge, and what `Button`'s
+     `subtle` variant lands on here. `.auth` remapped every other role onto
+     this family and left `accent-soft` pointing at the app's teal, so the one
+     tinted thing on a green screen would have come out mint. */
+  --color-auth-soft: #e9f2de;
+  --color-auth-soft-line: #cfe3ba;
+
+  /* The brand panel is lit rather than flat: `panel` is the ground, `lift` is
+     the brightest point of the radial light behind the lockup, and `deep` is
+     the foot it falls away to. Three tokens because a gradient's extremes are
+     what text actually sits on, and a colour that is not a token cannot be
+     checked - `lift` is the worst case for every light value on the panel and
+     is audited as such in `contrast-audit.mjs`.
+
+     The green glow layered over them is `auth-glow-rgb` at 0.10, which
+     resolves lighter than `panel` and darker than `lift`, so `lift` stays the
+     bound. */
+  --color-auth-panel: #142b0d;
+  --color-auth-panel-lift: #1a3614;
+  --color-auth-panel-deep: #0a1806;
+  --color-auth-panel-text: #eef1f4;
+  --color-auth-panel-muted: #bdc2c4;
+  --color-auth-panel-faint: #9ba2a5;
+  --color-auth-panel-line: #3a4a30;
+  --color-auth-status: #5ec98f;
+  --color-auth-error: #b3462f;
+
+  /* Dark ground behind dialogs. */
+  --color-scrim: #0b0f17;
+
+  /* Dark monitoring surfaces — control room, workflow studio. These
+     keep a dark ground in BOTH themes, so they need their own text
+     tokens: `content` is near-black in the light theme and would be
+     invisible here. */
+  --color-dark-canvas: #0b0f17;
+  --color-dark-surface: #111827;
+  --color-dark-line: #1f2937;
+  --color-dark-header: #0f1622;
+  /* The boundary that identifies a control on a dark surface. The
+     handoff's #374151 is 1.72:1 here — the same failure `line-strong`
+     had on white, one theme over. This is the same neutral family two
+     steps lighter, at 3.93:1. */
+  --color-dark-line-strong: #6b7280;
+  /* Four tiers mirroring the light ramp: 18.9 / 11.8 / 7.0 / 2.4 against
+     `dark-surface`. `faint` fails as text at 2.4:1 and is for rules,
+     disabled glyphs and dividers only — the handoff assigns it to the
+     mono id line and the table column headers, and both of those have
+     to be read, so they take `subtle`. */
+  --color-dark-content: #f9fafb;
+  --color-dark-content-muted: #d1d5db;
+  --color-dark-content-subtle: #9ca3af;
+  --color-dark-content-faint: #4b5563;
+
+  /* Semantic accents for the dark screens, FIXED in both themes — the
+     ground here does not change with the theme, so neither should what
+     sits on it. Reaching for the theme's own `accent`/`danger` instead
+     would mean each of them had to read on near-black in two different
+     values, and the light theme's `revision` (#7C3AED) measures 3.11:1
+     there. These are the same hues at the weight near-black wants:
+     9.2 / 6.6 / 8.6 / 6.8 / 6.4 against `dark-surface`. */
+  /* The canvas dot grid. `dark-line` is the card border weight and
+     disappeared entirely against `dark-canvas`; this is the one step that
+     reads as texture without competing with an edge. Decorative. */
+  --color-dark-grid: #243044;
+
+  --color-dark-accent: #34d3b8;
+  --color-dark-danger: #f87171;
+  --color-dark-warning: #fbbf24;
+  --color-dark-info: #60a5fa;
+  --color-dark-revision: #a78bfa;
+
+  /* --- borders ---
+     `line` and `line-soft` are decorative (card edges, row dividers)
+     and are exempt from WCAG 1.4.11. `line-strong` is the boundary
+     that identifies a form control, so it must clear 3:1. The
+     handoff's #D1D5DB is 1.47:1 on white — it cannot be the input
+     border. This is the same neutral family at 3.15:1. */
+  --color-line: #e5e7eb;
+  --color-line-soft: #f3f4f6;
+  --color-line-strong: #828c9a;
+
+  /* --- text ---
+     Three readable tiers plus one decorative. `subtle` is the
+     lightest text permitted on a light surface (4.83:1). The
+     handoff's #9CA3AF is 2.54:1, so it lives on as `faint` for
+     disabled states and decorative glyphs only — anything that has
+     to be READ, including mono IDs and timestamps, uses `subtle`. */
+  --color-content: #111827;
+  --color-content-muted: #4b5563;
+  --color-content-subtle: #68707d;
+  --color-content-faint: #9ca3af;
+  --color-content-inverse: #ffffff;
+
+  /* --- status ---
+     Each role has a `-mark` (the handoff's dot/fill hue, non-text
+     only) and an unsuffixed value that is safe as text AND as a fill
+     under a white label. Components use the unsuffixed one for
+     anything with a glyph or a word in it. */
+  --color-success: #15803d;
+  --color-success-mark: #00a98f;
+  --color-success-ink: #15803d;
+  --color-success-soft: #e4f7f2;
+  --color-success-line: #bfede1;
+
+  --color-warning: #b45309;
+  --color-warning-mark: #f59e0b;
+  --color-warning-ink: #b45309;
+  --color-warning-soft: #fffbeb;
+  --color-warning-line: #fde68a;
+
+  --color-danger: #d82323;
+  --color-danger-hover: #b11d1d;
+  --color-danger-mark: #ef4444;
+  --color-danger-ink: #d82323;
+  --color-danger-soft: #fef2f2;
+  --color-danger-line: #fecaca;
+
+  --color-info: #1d4ed8;
+  --color-info-mark: #3b82f6;
+  --color-info-ink: #1d4ed8;
+  --color-info-soft: #eff6ff;
+  --color-info-line: #bfdbfe;
+
+  --color-revision: #7c3aed;
+  --color-revision-mark: #7c3aed;
+  --color-revision-ink: #7c3aed;
+  --color-revision-soft: #f5f3ff;
+  --color-revision-line: #ddd6fe;
+
+  --color-neutral: #4b5563;
+  --color-neutral-mark: #9ca3af;
+  --color-neutral-soft: #f3f4f6;
+  --color-neutral-line: #e5e7eb;
+
+  /* --- workflow designer node accents --- */
+  --color-node-start: #00806c;
+  --color-node-end: #d82323;
+  --color-node-decision: #7c3aed;
+  --color-node-reviewer: #1d4ed8;
+  --color-node-approver: #00806c;
+  --color-node-final: #b45309;
+  --color-node-idle: #6b7280;
+  --color-node-handle: #6b7280;
+
+  /* --- typefaces ---
+     Both are actually fetched in index.html. Never name a face in
+     --font-* that is not loaded: Inter sat in the <link> for months
+     while --font-sans went unset, so every screen rendered in the OS
+     default and the request was wasted. */
+  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system,
+    BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  /* The sign-in screen.
+
+     These were Barlow and Barlow Condensed - a poster pairing, and the
+     loudest reason the front door read as a concept rather than as this
+     product. A condensed display face is editorial furniture; it is also a
+     second identity, so somebody signed in through one typeface and landed in
+     another. Both roles are now the application's own face, kept as separate
+     tokens because the display role still differs in weight and tracking.
+
+     Barlow is no longer requested in index.html: nothing else used it. */
+  --font-auth: 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI',
+    sans-serif;
+  --font-auth-display: 'Plus Jakarta Sans', system-ui, -apple-system,
+    'Segoe UI', sans-serif;
+
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, 'SF Mono',
+    Menlo, Consolas, monospace;
+
+  /* --- type scale ---
+     Named by role, because the handoff's scale uses half-pixel sizes
+     that no numeric name would survive. 10px is the floor and is
+     reserved for uppercase mono eyebrows and column headers, where
+     caps, tracking and a mono face carry legibility that 10px of
+     lowercase sans would not. */
+  --text-eyebrow: 0.625rem;
+  --text-eyebrow--line-height: 0.875rem;
+  --text-data: 0.65625rem;
+  --text-data--line-height: 0.9375rem;
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+  --text-meta: 0.71875rem;
+  --text-meta--line-height: 1rem;
+  --text-ui: 0.78125rem;
+  --text-ui--line-height: 1.125rem;
+  --text-section: 0.8125rem;
+  --text-section--line-height: 1.125rem;
+  --text-pane: 1.0625rem;
+  --text-pane--line-height: 1.375rem;
+
+  /* --- the sign-in screen's own slots ---
+     The scale above is built for dense table screens: it bottoms out at 10px
+     and its largest body size is 13px. A sign-in screen is one card with six
+     things on it, read at rest by somebody who has not signed in yet, and it
+     was reaching for a hand-written `text-[0.875rem]` in eleven places to say
+     so. Four named slots instead, so this screen has a scale rather than a
+     habit. */
+  --text-auth-body: 0.875rem;
+  --text-auth-body--line-height: 1.375rem;
+  --text-auth-action: 0.9375rem;
+  --text-auth-action--line-height: 1.25rem;
+  --text-auth-head: 2rem;
+  --text-auth-head--line-height: 2.25rem;
+  --text-auth-hero: 2.375rem;
+  --text-auth-hero--line-height: 2.625rem;
+  --text-kpi: 1.625rem;
+  --text-kpi--line-height: 1.875rem;
+  --text-title: 1.5rem;
+  --text-title--line-height: 1.875rem;
+
+  /* --- letter-spacing ---
+     The eyebrow is the only place the app tracks type out; every other
+     heading tightens instead (see the :where(h1) rules below). */
+  --tracking-eyebrow: 0.08em;
+
+  /* --- motion ---
+     `out` for things entering or settling, `in-out` for things that
+     move and return. */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
+  /* --- radii ---
+     A control reads as a smaller version of the card's curve. */
+  --radius-chip: 6px;
+  --radius-control: 8px;
+  --radius-card: 12px;
+  --radius-pill: 9999px;
+
+  /* --- measures ---
+     The memo sheet is the only thing in the app sized after a piece of
+     paper rather than after a column of text. A4 is 595.28pt wide; at the
+     ~1.28 CSS-pixels-per-point this renders at, that is about 47rem, which
+     is what makes the line lengths on screen match the filed page. */
+  --container-sheet: 47rem;
+
+  /* --- elevation ---
+     Borders carry the structure in this design; shadows are reserved
+     for things that float above the page. Each is two layers — a
+     tight contact shadow that seats the edge, and a wide soft one
+     that gives the lift. */
+  --shadow-card:
+    0 1px 1px -0.5px rgb(17 24 39 / 0.03),
+    0 2px 6px -2px rgb(17 24 39 / 0.05);
+  --shadow-raised:
+    0 1px 2px -1px rgb(17 24 39 / 0.04),
+    0 2px 6px -2px rgb(17 24 39 / 0.05),
+    0 10px 28px -8px rgb(17 24 39 / 0.12);
+  --shadow-paper: 0 4px 16px -6px rgb(17 24 39 / 0.12);
+  --shadow-overlay: 0 24px 64px -16px rgb(17 24 39 / 0.45);
+  --shadow-node: 0 8px 24px -12px rgb(0 0 0 / 0.8);
+}
+
+/* ============================================================
+   Base
+   ============================================================ */
+
+@layer base {
+  /* One focus treatment for the whole app. `focus-visible` so the
+     ring appears for keyboard users and not on mouse click.
+
+     The design asks for a soft 3px teal halo. That is written here as a
+     translucent OUTLINE rather than the box-shadow the handoff specifies,
+     for two reasons that matter in a table-dense app: a box-shadow ring is
+     clipped by every `overflow: hidden` ancestor (so a focused control
+     inside a scrolling table loses its indicator), and it is silently
+     overridden by any component that sets a shadow of its own. An outline
+     is drawn outside the box, is never clipped, and survives Windows High
+     Contrast mode. */
+  :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    outline: 3px solid rgb(var(--accent-rgb) / 0.45);
+    outline-offset: 2px;
+    border-radius: var(--radius-control);
+  }
+
+  /* Never let an element remove the indicator without a replacement. */
+  :where(a, button, input, select, textarea, [tabindex]):focus:not(:focus-visible) {
+    outline: none;
+  }
+
+  html {
+    /* No `font-feature-settings` here any more: `cv11`/`ss01` were Inter's
+       character variants and mean nothing to Plus Jakarta Sans, which is
+       the face now loaded. Tabular figures are applied where they matter
+       (tables, below) rather than globally. */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background: var(--color-canvas);
+    color: var(--color-content);
+    font-family: var(--font-sans);
+  }
+
+  /* Numbers that sit in columns — counts, sizes, dates, IDs — line up. */
+  :where(table) {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Long document titles and headings break sensibly instead of leaving a
+     single orphaned word on the last line. */
+  :where(h1, h2, h3) {
+    text-wrap: balance;
+  }
+
+  /* Optical tracking. Type set large looks loose at the spacing that suits
+     body copy, so headings tighten slightly and the amount scales with the
+     size. `:where()` keeps specificity at zero, so any Tailwind `tracking-*`
+     utility on a specific heading still wins. */
+  :where(h1) {
+    letter-spacing: -0.021em;
+  }
+  :where(h2, h3) {
+    letter-spacing: -0.014em;
+  }
+}
+
+/* ============================================================
+   Components
+   ============================================================ */
+
+/* Tailwind v4 added `outline-color` to `transition-colors`, and this app's
+   focus indicator IS an outline. Every control carrying the utility - the
+   fields, every Button variant - animated its ring up from `currentColor`:
+   a 3px near-black flash before the teal arrived, and a lag for anyone
+   tabbing quickly through a form. A focus indicator has to be instant.
+
+   So the list is restated as v3 defined it, without `outline-color`. Two
+   spellings are needed: the utility, for the 39 components that use the
+   class, and a `transition-property` line after each `@apply` below, because
+   `@apply` copies Tailwind's own definition rather than this one. Only the
+   property is restated either way - the duration and easing keep coming from
+   Tailwind, so a hover still animates. */
+:root {
+  --transition-colours: color, background-color, border-color,
+                        text-decoration-color, fill, stroke;
+}
+
+@layer utilities {
+  .transition-colors {
+    transition-property: var(--transition-colours);
+  }
+}
+
+@layer components {
+  .sidebar-nav-item {
+    @apply flex items-center gap-2.5 rounded-control px-2.5 py-2 text-section
+           text-shell-muted transition-colors hover:bg-white/10
+           hover:text-shell-text;
+    transition-property: var(--transition-colours);
+  }
+
+  /* A 25% accent tint read only 1.30:1 against the sidebar, so the active
+     page was almost impossible to pick out. A solid fill carries it, and
+     the white label on it clears 4.9:1. */
+  .sidebar-nav-item.active {
+    @apply bg-accent font-semibold text-on-accent hover:bg-accent-hover
+           hover:text-on-accent;
+  }
+
+  /* The heading of a foldable group, which is the whole hit area: an
+     administrator aiming at a chevron 12px across on a rail they are already
+     scanning would miss it, so the label folds the group too. Full width and
+     the same left inset as the eyebrow it replaces, so nothing shifts when a
+     group becomes foldable. */
+  .sidebar-group-toggle {
+    @apply flex w-full items-center gap-1.5 rounded-control px-2 py-1.5
+           text-left transition-colors hover:bg-white/10;
+    transition-property: var(--transition-colours);
+  }
+
+  .doc-table-row {
+    @apply hover:bg-sunken transition-colors;
+    transition-property: var(--transition-colours);
+  }
+
+  /*
+    The Ideas mark on the workspace row, where a generic document glyph on a
+    teal chip used to sit.
+
+    Four petals, and each one is a window onto the SAME image file - the mark
+    cut out of the supplied logo, not redrawn. `background-size: 200%` scales
+    that file to twice the petal, so each petal shows exactly one quarter of
+    it and the four together reassemble the artwork pixel for pixel. Redrawing
+    it as four SVG paths would have been easier to animate and would also have
+    been an imitation of a logo, which is the one thing a logo may not be.
+
+    The petals settle into place once, clockwise, when the shell mounts - and
+    then the mark is still for the rest of the session.
+
+    It used to pulse on a four-second loop forever, and that was wrong on
+    three counts.
+
+    An endless animation is a claim that something is happening. Every serious
+    design system reserves it for exactly that - a load, a sync, a live
+    connection - because the eye reads repeated motion as "this changed, look
+    here". A mark that says so every four seconds and never means it spends
+    the day crying wolf. This stylesheet already draws that line itself: see
+    `livedot`, which pulses because a thing is genuinely live.
+
+    It also failed WCAG 2.2 SC 2.2.2. Content that moves or updates by itself,
+    runs beyond five seconds and sits alongside everything else needs an
+    in-page way to pause it. `prefers-reduced-motion` is not that mechanism -
+    it is an OS setting almost nobody has found - and the rail is beside the
+    whole application, all day. A perpetual loop here is a Level A failure;
+    a finite entrance is simply out of scope.
+
+    And this is a product people READ in - memos, approval chains, audit
+    trails. Motion in the corner of the eye competes with sustained reading,
+    which is most of what anyone does here.
+
+    So: triggered and finite, not ambient and infinite. Under 0.7s, transform
+    and opacity only, and nothing at all afterwards.
+  */
+  .ideas-mark {
+    position: relative;
+    display: block;
+    aspect-ratio: 1;
+  }
+
+  .ideas-mark-petal {
+    position: absolute;
+    width: 50%;
+    height: 50%;
+    background-image: url('/ideas-mark.png');
+    background-repeat: no-repeat;
+    background-size: 200% 200%;
+    /* `both`, so a petal is invisible through its delay rather than popping
+       in and then animating, and so the last frame sticks once it is done. */
+    animation: ideas-mark-settle 440ms var(--ease-out) both;
+  }
+
+  /*
+    Each petal scales out of the middle of the mark, so its origin is whichever
+    of its own corners touches the centre. The four together read as the
+    symbol opening rather than as four boxes appearing.
+  */
+  .ideas-mark-tl {
+    top: 0;
+    left: 0;
+    background-position: 0 0;
+    transform-origin: 100% 100%;
+  }
+  .ideas-mark-tr {
+    top: 0;
+    right: 0;
+    background-position: 100% 0;
+    transform-origin: 0 100%;
+    animation-delay: 80ms;
+  }
+  .ideas-mark-br {
+    bottom: 0;
+    right: 0;
+    background-position: 100% 100%;
+    transform-origin: 0 0;
+    animation-delay: 160ms;
+  }
+  .ideas-mark-bl {
+    bottom: 0;
+    left: 0;
+    background-position: 0 100%;
+    transform-origin: 100% 0;
+    animation-delay: 240ms;
+  }
+
+  /* Form field surface, shared by input / select / textarea so the
+     three never drift apart. */
+  .field {
+    @apply w-full rounded-control border border-line-strong bg-surface px-3 text-ui
+           text-content placeholder:text-content-subtle transition-colors
+           hover:border-content-subtle
+           disabled:cursor-not-allowed disabled:bg-sunken disabled:text-content-subtle;
+    transition-property: var(--transition-colours);
+  }
+
+  /* A text field or select that names no height of its own. `.field` sets
+     only horizontal padding, so without this one collapses to the height of
+     its text - 20px, half the size of every field beside it and a hard
+     target for a thumb. Fields that do say (`h-8.5`, `h-10`, ...) keep it. */
+  .field:where(input:not([type='checkbox'], [type='radio'], [type='range'], [type='file']), select):not([class*='h-']) {
+    min-height: 2.5rem;
+  }
+
+  .field-label {
+    @apply block text-meta font-semibold text-content-muted mb-1.5;
+  }
+
+  .field-error {
+    @apply mt-1.5 flex items-center gap-1.5 text-2xs text-danger-ink;
+  }
+
+  /* A hairline and nothing else. The previous pass gave every card a
+     soft lift; this design puts the structure back in the border and
+     keeps elevation for things that genuinely float above the page —
+     the command palette, a dialog, the document paper. On a dense
+     table screen a shadow under every panel reads as noise. */
+  .card {
+    @apply bg-surface border border-line rounded-card;
+  }
+
+  /*
+    The memo editor's own content.
+
+    Everything in here is inside a `contenteditable` region, so the elements
+    are produced by the browser rather than written in JSX - which means the
+    preflight reset strips headings, lists and tables back to plain text and
+    nothing puts the styling back. These rules are that.
+
+    They are also the only place in the app where element selectors are used
+    on purpose: there is no opportunity to put a class on a paragraph somebody
+    is in the middle of typing.
+
+    Sized to read as the memo rather than as the app: the same rhythm the PDF
+    template lays out, so what is on the screen is recognisably what will be
+    filed.
+  */
+  /*
+    The editor's own measuring container.
+
+    A table spans the memo's text column exactly, so a hundredth of this box
+    is a hundredth of that column however large the sheet is being shown.
+    That is what lets a row asked to be 40 points tall be the same fraction of
+    the page on screen as it is in the filed PDF, on a wide monitor and on a
+    laptop alike.
+
+    The width itself is set by the composer from the organisation's page
+    setup, because an administrator can change the paper and the margins and
+    the column the preparer types into has to be the column the memo is filed
+    at. The fallback is the delivered default - 508.88pt, A4 less two 43.2pt
+    margins - so the editor is correct before the setting has loaded and on
+    any screen that never sets it.
+  */
+  .memo-editor-shell {
+    container-type: inline-size;
+  }
+
+  /*
+    Focus mode: the editor and its toolbars alone, over everything else,
+    the text in a column the width of the sheet. Nothing about the memo
+    changes; only what is around it.
+  */
+  .memo-editor-shell-focus {
+    @apply fixed inset-0 z-40 overflow-y-auto bg-canvas px-4 py-6;
+  }
+
+  .memo-editor-shell-focus > * {
+    @apply mx-auto w-full max-w-3xl;
+  }
+
+  .memo-editor-shell-focus .memo-editor {
+    @apply min-h-96 rounded-card border border-line bg-surface p-8 shadow-card;
+  }
+
+  .memo-editor {
+    @apply min-h-64 w-full text-ui leading-relaxed text-content;
+    --memo-pt: calc(100cqw / var(--memo-text-width, 508.88));
+    /*
+      The face and the size the memo is set in, written on the region by
+      the editor (`applyBodyAttrs`). Ten points is the scale of one; the
+      headings and the table follow in `em`, in the renderer's proportions.
+    */
+    font-family: var(--memo-font, var(--font-sans));
+    font-size: calc(var(--text-ui) * var(--memo-scale, 1));
+  }
+
+  /*
+    Reaching for a cell's edge. The edge is already there and is where a
+    person reaches anyway, so there are no drag handles in the document -
+    nothing the caret can land in, and nothing anybody can delete by accident.
+  */
+  .memo-editor-column-grip {
+    cursor: col-resize;
+  }
+
+  .memo-editor-row-grip {
+    cursor: row-resize;
+  }
+
+  /* Mid-drag the browser would otherwise select the text being dragged over. */
+  .memo-editor-resizing {
+    @apply select-none;
+  }
+
+  /*
+    The chrome, as a modifier.
+
+    Split off when the editor moved onto the memo sheet: there it is the page
+    itself, so a border, a background and a radius around it would draw a box
+    on a piece of paper. Everywhere else it is still a field on a form and
+    needs to look like one.
+  */
+  .memo-editor-framed {
+    @apply rounded-control border border-line-strong bg-surface px-4 py-3
+           transition-colors hover:border-content-subtle;
+    transition-property: var(--transition-colours);
+  }
+
+  .memo-editor-framed:focus-visible {
+    @apply border-accent outline-2 outline-offset-2 outline-accent;
+  }
+
+  /*
+    On the sheet there is no box to tint, so focus is shown the way the rest
+    of the page shows it - a ring, offset far enough to clear the text.
+  */
+  .memo-editor:not(.memo-editor-framed):focus-visible {
+    @apply rounded-chip outline-2 outline-offset-4 outline-accent;
+  }
+
+  .memo-editor-invalid {
+    @apply border-danger-line;
+  }
+
+  .memo-editor > * + * {
+    @apply mt-2;
+  }
+
+  /*
+    No `uppercase`. The template draws a heading exactly as it was typed, so
+    styling it uppercase here made the editor promise something the filed PDF
+    does not do - "Employee Details:" on screen, "Employee Details:" in the
+    memo, shouted in one and not the other.
+  */
+  .memo-editor h1 {
+    @apply mt-4 text-section font-semibold tracking-wide text-content underline;
+    font-size: 1.1em;
+  }
+
+  .memo-editor h2 {
+    @apply mt-3.5 text-ui font-semibold text-content underline;
+    font-size: 1.05em;
+  }
+
+  .memo-editor ul,
+  .memo-editor ol {
+    @apply pl-5;
+  }
+
+  .memo-editor ul {
+    @apply list-disc;
+  }
+
+  .memo-editor ol {
+    @apply list-decimal;
+  }
+
+  .memo-editor li {
+    @apply mb-1;
+  }
+
+  .memo-editor table {
+    @apply w-full border-collapse;
+  }
+
+  /*
+    `break-words` because a column somebody has narrowed is a fixed width,
+    and a long word in one would otherwise push the column wider on screen
+    than the PDF will draw it - so the two would stop agreeing about where
+    the columns are.
+  */
+  .memo-editor th,
+  .memo-editor td {
+    @apply border border-line-strong px-2 py-1 align-top text-ui break-words;
+    font-size: 0.85em;
+  }
+
+  .memo-editor th {
+    @apply bg-sunken text-left font-semibold;
+  }
+
+  /*
+    Find matches, painted by the highlight registry rather than by a node in
+    the document - see `utils/memoFind`. Every match in the warning tint; the
+    current one inverted in the accent, which reads in both themes.
+  */
+  .memo-editor::highlight(memo-find) {
+    background-color: var(--color-warning-line);
+  }
+
+  .memo-editor::highlight(memo-find-current) {
+    background-color: var(--color-accent-ink);
+    color: var(--color-accent-soft);
+  }
+
+  /* A word the dictionary does not know - the underline every editor uses. */
+  .memo-editor::highlight(memo-spelling) {
+    text-decoration: underline wavy var(--color-danger-ink);
+    text-decoration-skip-ink: none;
+  }
+
+  /*
+    A page break is a thing you place, not a thing you type inside, so it is
+    `contenteditable="false"` and drawn as a marker rather than as content.
+  */
+  .memo-editor .memo-page-break {
+    @apply my-3 select-none rounded-chip border border-dashed border-line-strong
+           bg-sunken py-1 text-center text-2xs uppercase tracking-wide
+           text-content-subtle;
+  }
+
+  /*
+    A picture: a block of its own, as wide as the memo's column unless it
+    was sized (the inline width is the share of the column), and never
+    wider than its own pixels - a small picture is not stretched.
+  */
+  .memo-editor .memo-image {
+    @apply my-3 max-w-full cursor-default;
+  }
+
+  .memo-editor .memo-image img {
+    @apply block h-auto w-full max-w-full;
+  }
+
+  .memo-editor .memo-image:not([data-memo-share]) img {
+    width: auto;
+  }
+
+  /* The paper the memo preview is shown on, beside the editor. */
+  .memo-preview-sheet {
+    @apply overflow-hidden rounded-card border border-line bg-sunken;
+  }
+
+  /*
+    The memo as a sheet of paper you type on.
+
+    The compose step used to be a form *about* a document: a card of labelled
+    fields for To, From and Date, then a separate bordered box headed "The
+    memo", and nothing that looked like the thing being written until the
+    signing dialog drew it. Two representations of one document, and the one
+    people were editing was the one that looked least like the result.
+
+    So the fields moved onto the page, in the places the template prints them.
+    The proportions are the template's own, and they are now the ORGANISATION'S
+    template rather than a fixed one: the composer sets the two custom
+    properties from the page setup, so widening the margin moves the edge of
+    the sheet on screen exactly as it moves it in the PDF.
+
+    The fallbacks are the delivered default - A4 at 595.28pt with a 43.2pt
+    side margin is the 7.25%, and the 52pt label column of a 508.88pt text
+    width is the 10.2%.
+  */
+  .memo-sheet {
+    @apply mx-auto w-full max-w-sheet rounded-card border border-line
+           bg-surface shadow-paper;
+    /* Two properties, not `padding-inline`: the left and right margins are
+       separately settable, and a gutter for a punch hole is the whole reason
+       they are. */
+    padding-left: var(--memo-margin-left, 7.25%);
+    padding-right: var(--memo-margin-right, 7.25%);
+    @apply pt-7 pb-6;
+  }
+
+  /* The company mark, set to the right exactly as the template draws it. */
+  .memo-sheet-brand {
+    @apply mb-5 flex justify-end;
+  }
+
+  /* The rule the template draws above the header block. */
+  .memo-sheet-rule {
+    @apply border-t border-content;
+  }
+
+  .memo-sheet-header {
+    @apply grid gap-x-3 gap-y-1 pt-2;
+    grid-template-columns: 10.2% minmax(0, 1fr);
+  }
+
+  .memo-sheet-label {
+    @apply pt-1 text-ui font-semibold text-content;
+  }
+
+  /*
+    A header value: an input that looks like the printed line, not like a
+    form field. Bold, because the template prints these bold, and with only
+    a hairline underneath so it still reads as something you can type in.
+  */
+  .memo-sheet-value {
+    @apply w-full border-0 border-b border-transparent bg-transparent px-0 py-1
+           text-ui font-semibold text-content
+           hover:border-line-strong
+           focus:border-accent focus:outline-none;
+    transition-property: var(--transition-colours);
+  }
+
+  .memo-sheet-value::placeholder {
+    @apply font-normal text-content-faint;
+  }
+
+  .memo-sheet-value-invalid {
+    @apply border-danger-line;
+  }
+
+  /*
+    The signature strip, as the foot of the page will print it.
+    Shown, not editable: who signs is decided on the routing step, and this
+    is here so the preparer can see the memo is a whole document rather than
+    a block of text that becomes one later.
+  */
+  .memo-sheet-strip {
+    @apply mt-8 grid gap-4 pt-2;
+  }
+
+  .memo-sheet-column {
+    @apply border-t border-content pt-1.5 text-center;
+  }
+
+  /*
+    A note placed on the page.
+
+    Coloured like a note rather than like the memo: it is something somebody
+    added beside the text, and the filed PDF draws it the same way. The border
+    is what makes it a box on paper rather than a second column of prose.
+  */
+  .memo-note {
+    @apply relative overflow-hidden rounded-chip border border-line-strong
+           bg-warning-soft shadow-card;
+  }
+
+  /*
+    The controls float over the note rather than sitting above the text.
+
+    Taking a row of their own made the box's usable area smaller on screen
+    than the box the renderer draws, so a note that looked full here still had
+    room in the filed PDF - and one that looked to fit was clipped. What is
+    visible while writing has to be what is drawn.
+  */
+  .memo-note-bar {
+    @apply absolute right-0 top-0 z-10 flex items-center gap-0.5
+           rounded-bl-chip bg-surface/85 px-0.5 py-px;
+  }
+
+  .memo-note-grip {
+    @apply cursor-grab rounded-chip p-0.5 text-content-subtle
+           hover:bg-sunken hover:text-content
+           focus-visible:outline-2 focus-visible:outline-offset-1
+           focus-visible:outline-accent
+           active:cursor-grabbing
+           disabled:cursor-not-allowed disabled:opacity-50;
+    transition-property: var(--transition-colours);
+  }
+
+  .memo-note-remove {
+    @apply rounded-chip p-0.5 text-content-subtle
+           hover:bg-danger-soft hover:text-danger-ink
+           focus-visible:outline-2 focus-visible:outline-offset-1
+           focus-visible:outline-accent
+           disabled:cursor-not-allowed disabled:opacity-50;
+    transition-property: var(--transition-colours);
+  }
+
+  .memo-note-text {
+    @apply h-full w-full resize-none border-0 bg-transparent px-1.5 py-1
+           text-2xs leading-snug text-content
+           focus:outline-none
+           disabled:cursor-not-allowed;
+  }
+
+  .memo-note-text::placeholder {
+    @apply text-content-faint;
+  }
+
+  /* The corner you pull to resize, drawn as two short rules. */
+  .memo-note-corner {
+    @apply absolute bottom-0 right-0 h-3 w-3 cursor-nwse-resize
+           border-b-2 border-r-2 border-line-strong;
+  }
+
+  /*
+    The sign-in screen's palette, applied by remapping rather than by
+    rewriting.
+
+    Everything inside `.auth` keeps using the ordinary tokens - `bg-surface`,
+    `text-content`, `border-line-strong` - and they resolve to the `auth-*`
+    family instead. So `Button`, `.field`, `ThemeToggle` and the global focus
+    ring all come out in the screen's own colours with no second copy of any
+    of them, and a control added here later is in the palette by default
+    rather than by remembering.
+
+    Scoped to this one element. Nothing outside it changes, which is the
+    point: the application is teal because that is what an action looks like
+    here, and the front door is the company's green because that is what the
+    company looks like.
+  */
+  .auth {
+    --color-canvas: var(--color-auth-bg);
+    --color-surface: var(--color-auth-surface);
+    --color-sunken: var(--color-auth-bg);
+
+    --color-content: var(--color-auth-text);
+    --color-content-muted: var(--color-auth-ink);
+    --color-content-subtle: var(--color-auth-ink);
+    --color-content-faint: var(--color-auth-line-strong);
+
+    --color-line: var(--color-auth-line);
+    --color-line-soft: var(--color-auth-line);
+    --color-line-strong: var(--color-auth-line-strong);
+
+    --color-accent: var(--color-auth-fill);
+    --color-accent-hover: var(--color-auth-fill-hover);
+    --color-accent-active: var(--color-auth-fill-hover);
+    --color-accent-ink: var(--color-auth-ink);
+    --color-accent-soft: var(--color-auth-soft);
+    --color-accent-line: var(--color-auth-soft-line);
+    --color-on-accent: var(--color-auth-on-fill);
+
+    --color-danger-ink: var(--color-auth-error);
+    --color-danger-line: var(--color-auth-error);
+
+    /* The focus ring is drawn from a raw triple, so it has to be remapped
+       separately or every field on this screen focuses in the app's teal. */
+    --accent-rgb: 64 115 20;
+
+    /* The logo's own lime, as a triple, for the one thing it is fit for:
+       light. It is 1.9:1 on white and cannot carry a word anywhere. */
+    --auth-glow-rgb: 141 198 63;
+
+    font-family: var(--font-auth);
+  }
+
+  :root[data-theme='dark'] .auth {
+    --accent-rgb: 141 198 63;
+  }
+
+  /*
+    The brand panel's ground.
+
+    This was a flat swatch with a 68px graph-paper grid ruled over it, and
+    every object on the screen wore a square frame with a cross ticked outside
+    each corner. Both are draughtsman's marks - they say "this is a drawing of
+    a screen", which is exactly what the screen must not say to somebody about
+    to type a password into it.
+
+    What replaces them is light, in three layers and no lines: a wide radial
+    lift behind the lockup, a low green aurora at the foot, and a fall to
+    `panel-deep` down the diagonal. All three resolve between `panel-deep` and
+    `panel-lift`, and `panel-lift` is the audited bound.
+  */
+  .auth-panel {
+    background-color: var(--color-auth-panel);
+    background-image:
+      radial-gradient(
+        118% 82% at 8% -6%,
+        var(--color-auth-panel-lift) 0%,
+        transparent 62%
+      ),
+      radial-gradient(
+        80% 60% at 88% 108%,
+        rgb(var(--auth-glow-rgb) / 0.1) 0%,
+        transparent 70%
+      ),
+      linear-gradient(158deg, transparent 34%, var(--color-auth-panel-deep) 100%);
+  }
+
+  /*
+    The one object on the form side. A sign-in form is the single thing on the
+    page a person has to act on, so it is the single thing allowed to float -
+    everywhere else in this design a border carries the structure.
+  */
+  .auth-card {
+    @apply rounded-card border border-line bg-surface shadow-raised;
+  }
+
+  /*
+    A live region has to already be in the accessibility tree when its message
+    arrives, or the announcement is simply missed - so it is rendered whether
+    or not there is anything to say. That makes it a flex item, and an empty
+    flex item still takes its parent's `gap`: 24px of nothing sat between the
+    Microsoft button and the first field, on every visit where nothing had
+    gone wrong.
+
+    Absolute positioning takes it out of the flex flow without taking it out
+    of the tree - which `display: none`, `hidden` and `visibility` would all
+    do, reintroducing the bug this is here to avoid. It returns to the flow
+    the moment it has something to announce.
+  */
+  .live-region:empty {
+    position: absolute;
+  }
+
+  /* Table column headers. Three tables hand-rolled this with sizes that had
+     drifted apart (`text-meta` on one, `text-2xs` on the others) and set in
+     wide-tracked all-caps, which shouts a label that should recede. Title
+     case at a normal width reads faster and lets the data lead. */
+  /* Column headers are set like the eyebrow — 10px mono, tracked,
+     uppercase — so the header band recedes and the data leads. The
+     previous title-case sans at 12px competed with the rows. */
+  .table-head {
+    @apply whitespace-nowrap px-3 py-2.5 text-left font-mono text-eyebrow
+           font-medium uppercase tracking-eyebrow text-content-subtle;
+  }
+
+  /* The same header on the two monitoring screens. The handoff puts these
+     labels in #4B5563, which is 2.35:1 on the card — a column header has
+     to be read, so it takes `dark-content-subtle` at 7.0:1. */
+  .dark-table-head {
+    @apply whitespace-nowrap px-3 py-2.5 text-left font-mono text-eyebrow
+           font-medium uppercase tracking-eyebrow text-dark-content-subtle;
+  }
+
+  /* Form field on a dark monitoring surface, mirroring `.field`. */
+  .dark-field {
+    @apply w-full rounded-control border border-dark-line-strong bg-dark-surface px-3
+           text-ui text-dark-content placeholder:text-dark-content-subtle
+           transition-colors hover:border-dark-content-subtle
+           disabled:cursor-not-allowed disabled:opacity-50;
+    transition-property: var(--transition-colours);
+  }
+}
+
+
+/* ============================================================
+   Dark theme
+   A resolved value ("light" or "dark") is always on <html>, written by the
+   inline script in index.html before first paint — so there is no flash and
+   the CSS below needs only one selector rather than duplicating the palette
+   for the prefers-color-scheme case.
+
+   Tailwind's utilities all read var(--color-*), so overriding the variables
+   here re-themes every component without touching a single class name.
+   ============================================================ */
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  /* surfaces: canvas sits behind cards, surface is the card, sunken is a
+     well inside it — the same three-step relationship as the light theme.
+     The canvas is the design's own dark ground, so the two monitoring
+     screens stop being a special case in this theme. */
+  --color-canvas: #0b0f17;
+  --color-surface: #111827;
+  --color-sunken: #1a2233;
+  /* Lighter than the canvas, not darker. At #0a0e14 the rail was within a
+     couple of steps of the page behind it and simply dissolved — in dark
+     themes an elevated surface reads by being *nearer* the light, which is
+     also how the light theme's navy rail separates from its pale canvas. */
+  --color-shell: #171f2e;
+  --color-shell-hover: #232d40;
+  --color-shell-text: #f9fafb;
+  --color-shell-label: #8b93a1;
+  --color-shell-muted: #9ca3af;
+  --color-shell-pill: #374151;
+  --color-shell-pill-ink: #f9fafb;
+
+  /* `brand` itself is deliberately not redefined here: a logo that changes
+     colour with a theme stops being a logo. Its two grounds do swap roles,
+     because in a dark theme a thing recedes by moving toward the ground
+     rather than away from it. */
+  --color-brand-deep: #a5d861;
+  --color-brand-soft: #16250c;
+
+  --color-scrim: #010409;
+
+  /*
+     The sign-in screen in the dark theme.
+
+     One value is not the handoff's and could not be: it sets the primary
+     button as "solid --accent, white text", and in this theme `--accent` is
+     the logo's own lime. White on it measures 2.04:1. The label goes dark
+     instead, at 8.95:1 - the same inversion the rest of the app already makes
+     for its teal, and for the same reason.
+
+     The error red moves too: #B3462F on this surface is 3.0:1, under the bar
+     for the 13px it is set at.
+  */
+  --color-auth-bg: #121611;
+  --color-auth-surface: #1a211a;
+  --color-auth-text: #eff2ec;
+  --color-auth-line: #343b33;
+  --color-auth-line-strong: #8a9487;
+  --color-auth-accent: #8dc63f;
+  --color-auth-fill: #8dc63f;
+  --color-auth-fill-hover: #a3d45d;
+  --color-auth-on-fill: #121611;
+  --color-auth-ink: #b9cfa6;
+  --color-auth-soft: #1b2a14;
+  --color-auth-soft-line: #2f4326;
+  --color-auth-panel: #0f1d08;
+  --color-auth-panel-lift: #16300c;
+  --color-auth-panel-deep: #060f04;
+  --color-auth-panel-text: #eef1f4;
+  --color-auth-panel-muted: #b6bcbe;
+  --color-auth-panel-faint: #939a9d;
+  --color-auth-panel-line: #33412c;
+  --color-auth-status: #5ec98f;
+  --color-auth-error: #f3a08d;
+  --color-line: #2b3444;
+  --color-line-soft: #1c2432;
+  /* control boundary — still has to clear 3:1, now against #111827 */
+  --color-line-strong: #7b8798;
+
+  --color-content: #e6edf3;
+  --color-content-muted: #a9b4c0;
+  --color-content-subtle: #8b97a5;
+  --color-content-faint: #6b7684;
+  --color-content-inverse: #ffffff;
+  /* the teal fill is bright here, so its label goes dark */
+  --color-on-accent: #04231e;
+
+  --color-accent-mark: #34d3b8;
+  --color-accent: #2ec4aa;
+  --color-accent-hover: #45d4bc;
+  --color-accent-active: #5fe0c8;
+  --color-accent-soft: #0c2b26;
+  --color-accent-line: #174a41;
+  --color-accent-ink: #5fe0c8;
+
+  --color-success: #2ec4aa;
+  --color-success-mark: #34d3b8;
+  --color-success-ink: #2ec4aa;
+  --color-success-soft: #0c2b26;
+  --color-success-line: #174a41;
+
+  --color-warning: #d29922;
+  --color-warning-mark: #f59e0b;
+  --color-warning-ink: #e3a72f;
+  --color-warning-soft: #2b2413;
+  --color-warning-line: #4d3f16;
+
+  /* white sits on this fill, so it stays a mid red rather than the brighter
+     one the rest of the dark palette would suggest */
+  --color-danger: #c9372c;
+  --color-danger-hover: #a92b22;
+  --color-danger-mark: #ef4444;
+  --color-danger-ink: #ff8b82;
+  --color-danger-soft: #2d1416;
+  --color-danger-line: #5c1f21;
+
+  --color-info: #58a6ff;
+  --color-info-mark: #3b82f6;
+  --color-info-ink: #58a6ff;
+  --color-info-soft: #0d1f36;
+  --color-info-line: #1f3f66;
+
+  --color-revision: #a371f7;
+  --color-revision-mark: #a371f7;
+  --color-revision-ink: #a371f7;
+  --color-revision-soft: #1d1533;
+  --color-revision-line: #3a2a5c;
+
+  --color-neutral: #a9b4c0;
+  --color-neutral-mark: #6b7684;
+  --color-neutral-soft: #1a2233;
+  --color-neutral-line: #2b3444;
+
+  /* designer nodes have to stay legible on the dark canvas */
+  --color-node-start: #2ec4aa;
+  --color-node-end: #e5534b;
+  --color-node-decision: #a371f7;
+  --color-node-reviewer: #58a6ff;
+  --color-node-approver: #2ec4aa;
+  --color-node-final: #d29922;
+  --color-node-idle: #8b97a5;
+  --color-node-handle: #8b97a5;
+
+  /* A soft drop shadow is invisible on a dark ground, so depth comes from a
+     darker and more opaque version of the same two-layer shape. */
+  --shadow-card:
+    0 1px 1px -0.5px rgb(1 4 9 / 0.6),
+    0 3px 8px -2px rgb(1 4 9 / 0.5);
+  --shadow-raised:
+    0 1px 2px -1px rgb(1 4 9 / 0.6),
+    0 2px 6px -2px rgb(1 4 9 / 0.5),
+    0 10px 28px -8px rgb(1 4 9 / 0.6);
+  --shadow-paper: 0 4px 16px -6px rgb(1 4 9 / 0.7);
+  --shadow-overlay: 0 24px 64px -16px rgb(1 4 9 / 0.75);
+  --shadow-node: 0 8px 24px -12px rgb(0 0 0 / 0.8);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+/* ============================================================
+   Motion
+   ============================================================ */
+
+/* The reduced-motion block below neutralises every animation here for
+   anyone who asks for that. */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* One petal of the Ideas mark opening out of the centre. Staggered clockwise
+   across the four, it reads as the symbol assembling itself - once, on mount,
+   and never again for the rest of the session.
+
+   Transform and opacity only. Both are composited, so the entrance cannot
+   cost a layout or a repaint on a screen that is still fetching its first
+   queue - which is precisely when this plays.
+
+   The final keyframe IS the finished petal, and `animation-fill-mode: both`
+   holds it there. That is also what makes the reduced-motion rule correct
+   rather than merely quiet: it cuts every animation to one 0.01ms iteration,
+   which lands straight on this frame, so somebody who asked for stillness
+   gets the whole mark at full size instead of four petals stranded at 40%. */
+@keyframes ideas-mark-settle {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  70% {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ============================================================
+   Focus ring
+   ============================================================ */
+
+/* The accent as raw RGB channels, because the ring is drawn at 45% alpha
+   and the hex token cannot express that. `.auth` overrides this pair, or
+   every field on the sign-in screen would focus in the application's teal
+   rather than its own green. */
+:root {
+  --accent-rgb: 0 169 143;
+}
+:root[data-theme='dark'] {
+  --accent-rgb: 52 211 184;
+}
+
+/* ============================================================
+   Workflow progress
+   ============================================================ */
+
+/* A workflow that is still waiting on somebody breathes; one that has
+   finished, been rejected or been deleted sits still, so a glance down a
+   list separates live work from closed work without reading a status.
+
+   Opacity is the only property driven, deliberately: the fill colour varies
+   by status (accent, success, danger), and the track clips overflow, so
+   neither a colour swap nor an outer glow would survive. Opacity also
+   scales down to the 4% dot a just-submitted document shows, where a
+   gradient sweep would have nothing to travel across.
+
+   `prefers-reduced-motion` stops it outright via the block above. */
+@keyframes progress-pending {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.progress-pending {
+  animation: progress-pending 1.8s var(--ease-in-out) infinite;
+}
+
+/* ============================================================
+   Live indicator
+   ============================================================ */
+
+/* The 6px dot on the topbar's "Live" pill. A slow two-second breath, so it
+   reads as a heartbeat rather than a blink. It is decorative — the word
+   "Live" beside it carries the meaning — and the global reduced-motion
+   block above stops it outright. */
+@keyframes livedot {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgb(var(--accent-rgb) / 0.5);
+  }
+  50% {
+    opacity: 0.55;
+    box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0);
+  }
+}
+
+.livedot {
+  animation: livedot 2s var(--ease-in-out) infinite;
+}
+
+/* ============================================================
+   Login activity
+   ============================================================ */
+
+/* Rows arrive from just below their resting place, staggered by index so a
+   list of people reads as arriving rather than appearing all at once. `both`
+   holds the start frame during the delay — without it every row is visible
+   for a frame before its animation begins, which is the flicker this is
+   meant to avoid. Transform and opacity only, so nothing reflows, and the
+   global reduced-motion block above neutralises the lot. */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.rise-in {
+  animation: rise-in 320ms var(--ease-out) both;
+}
+
+/* The ring that marks a session arriving or ending between two polls. It
+   expands and fades from the row's own edge, so the eye is drawn to what
+   changed without the row moving and pushing its neighbours around. */
+@keyframes settle-ring {
+  from {
+    box-shadow: 0 0 0 0 rgb(var(--accent-rgb) / 0.35);
+  }
+  to {
+    box-shadow: 0 0 0 10px rgb(var(--accent-rgb) / 0);
+  }
+}
+
+.settle-ring {
+  animation: settle-ring 1.4s var(--ease-out) 1;
+}
+
+/* ============================================================
+   Figure pulse
+   ============================================================ */
+
+/* The tone dot on a figure tile sends out a ring - three of them, when the
+   figure first shows or changes - and is then still. A count is a total, not
+   work in flight, so it does not get to loop: three rings is "this is a live
+   number", four seconds of it, and the page goes back to being read. Under
+   the five seconds WCAG 2.2.2 allows without a pause control.
+
+   The ring is the dot's own colour (`background: inherit`), so one rule
+   serves every tone. Transform and opacity only, so nothing reflows; the
+   global reduced-motion block lands it on its last, invisible frame. */
+@keyframes figure-pulse {
+  from {
+    opacity: 0.6;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(3.2);
+  }
+}
+
+.figure-pulse {
+  position: relative;
+}
+
+.figure-pulse::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: inherit;
+  animation: figure-pulse 1.4s var(--ease-out) 3 both;
+}
+
+/* Touch screens. Outside every layer on purpose: a utility such as `h-8.5`
+   or `text-ui` on a field must not undo it.
+   - 44px is the smallest target a thumb hits reliably; a mouse needs less,
+     which is why the desktop sizes stay as they are.
+   - Text under 16px in a field makes iPhone Safari zoom the whole page in
+     when the field is tapped, and leave it zoomed after. */
+@media (pointer: coarse) {
+  .field:where(input:not([type='checkbox'], [type='radio'], [type='range'], [type='file']), select) {
+    min-height: 2.75rem;
+    font-size: max(16px, 1em);
+  }
+
+  /* A browser's own tick box is 13px: fine under a pointer, a guess under a
+     thumb. */
+  input:where([type='checkbox'], [type='radio']) {
+    width: 1.25rem;
+    height: 1.25rem;
+  }
+}

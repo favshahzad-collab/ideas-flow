@@ -1,0 +1,12 @@
+-- One Super Administrator at a time, handed over rather than added.
+--
+-- SUPER_ADMIN_TRANSFERRED   the Super Administrator handed the role to somebody
+--                           else (and any extra one left from before was made
+--                           a limited administrator)
+--
+-- No data is changed here. An install upgraded from when every administrator
+-- was a Super Administrator keeps them all until the Super Administrator
+-- transfers the role or makes the others limited on the Access control
+-- screen: which one is "the" Super Administrator is a person's decision, not
+-- a migration's.
+ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'SUPER_ADMIN_TRANSFERRED';

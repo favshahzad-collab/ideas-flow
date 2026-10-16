@@ -1,0 +1,21 @@
+-- Moving an in-flight step from one approver to another.
+--
+-- Until now a memo sitting with somebody who cannot act on it had two exits
+-- and no good one. Skipping is off unless a deployment switches it on, it is
+-- the preparer's alone, and it drops the approval entirely - the memo
+-- completes with a step nobody signed. The other is a delegation recorded
+-- after the fact, which says the wrong thing: that the approver arranged
+-- cover, when what actually happened is that the organisation moved the work.
+--
+-- `WORKFLOW_STEP_REASSIGNED` is the record, and it has to be, because the
+-- chain cannot hold one. A step's assignment is a single column, and moving
+-- the step overwrites it - so after the change the chain shows only where the
+-- memo went, never where it was or who sent it there. Four facts go in the
+-- row: who moved it, off whom, onto whom, and the reason they gave.
+--
+-- `STEP_REASSIGNED` is deliberately not `STEP_SKIPPED`. Skipped means the
+-- memo moved on with that step unsigned; this means the step is still
+-- required and is now somebody else's. Filing one as the other would tell a
+-- person their approval had been dropped when it had been handed on.
+ALTER TYPE "NotificationType" ADD VALUE IF NOT EXISTS 'STEP_REASSIGNED';
+ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'WORKFLOW_STEP_REASSIGNED';

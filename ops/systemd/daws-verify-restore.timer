@@ -1,0 +1,13 @@
+[Unit]
+Description=Prove the DAWS backups restore, weekly
+
+[Timer]
+# Sunday morning, after the night's backup. Weekly rather than nightly
+# because it restores the whole database: often enough that a broken backup
+# is found in days, rare enough that nobody turns it off.
+OnCalendar=Sun *-*-* 04:00:00
+Persistent=true
+RandomizedDelaySec=15min
+
+[Install]
+WantedBy=timers.target

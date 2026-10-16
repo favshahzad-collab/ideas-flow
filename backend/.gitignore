@@ -1,0 +1,17 @@
+node_modules/
+.env
+dist/
+build/
+/src/generated/prisma
+.agents/
+.claude/
+.windsurf/
+
+# Uploaded documents and signature images. Runtime data, not source: the
+# seeded fixtures here are indistinguishable from a real upload, and a signed
+# PDF carries someone's actual signature.
+storage/
+
+# The document seal's certificate and private key. Server only, never in git.
+*.p12
+*.pfx
